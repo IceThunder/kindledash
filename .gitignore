@@ -1,0 +1,18 @@
+# 构建产物
+node_modules/
+out/
+release/
+dist/
+
+# 日志与本地文件
+*.log
+.DS_Store
+
+# 本地环境配置
+.env
+.env.local
+
+# 编辑器
+.idea/
+.vscode/
+*.swp
