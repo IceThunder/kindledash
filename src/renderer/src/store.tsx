@@ -1,6 +1,6 @@
-import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react'
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { kd } from './api'
-import type { ConnectionSettings, ConnState, StatsSnapshot } from '../../shared/types'
+import type { DeviceProfile, DeviceStore, ConnState, StatsSnapshot } from '../../shared/types'
 
 // ---------- 工具 ----------
 
@@ -49,10 +49,15 @@ export const STATE_COLOR: Record<string, string> = {
 interface ConnCtx {
   state: ConnState
   err: string
-  settings: ConnectionSettings | null
-  connect: (s: ConnectionSettings) => Promise<void>
+  /** 全部已保存设备 */
+  devices: DeviceProfile[]
+  /** 当前连接（或正在连接）的设备 */
+  activeId: string | null
+  /** 连接指定设备（自动断开当前） */
+  connectDevice: (p: DeviceProfile) => Promise<void>
   disconnect: () => Promise<void>
-  setSettings: (s: ConnectionSettings) => Promise<void>
+  /** 设备配置变更后刷新本地列表 */
+  refreshDevices: (store?: DeviceStore) => Promise<void>
 }
 
 const ConnContext = createContext<ConnCtx>(null as never)
@@ -80,7 +85,8 @@ const MAX_POINTS = 120
 export function AppProvider({ children }: { children: React.ReactNode }): JSX.Element {
   const [state, setState] = useState<ConnState>('disconnected')
   const [err, setErr] = useState('')
-  const [settings, setSettings] = useState<ConnectionSettings | null>(null)
+  const [devices, setDevices] = useState<DeviceProfile[]>([])
+  const [activeId, setActiveId] = useState<string | null>(null)
   const [stats, setStats] = useState<StatsSnapshot | null>(null)
   const [history, setHistory] = useState<StatsHistory>({
     cpu: [],
@@ -88,16 +94,23 @@ export function AppProvider({ children }: { children: React.ReactNode }): JSX.El
     memTotalKB: 0,
     load1: []
   })
-  const wasConnected = useRef(false)
+
+  const applyStore = useCallback((store: DeviceStore) => {
+    setDevices(store.devices)
+  }, [])
+
+  const refreshDevices = useCallback(
+    async (store?: DeviceStore) => {
+      applyStore(store ?? (await kd.devicesList()))
+    },
+    [applyStore]
+  )
 
   useEffect(() => {
     const off = kd.onState((s, e) => {
       setState(s)
       setErr(e || '')
-      if (s === 'connected') {
-        wasConnected.current = true
-        void kd.startStats(1000)
-      } else if (s === 'disconnected') {
+      if (s === 'disconnected') {
         setStats(null)
         setHistory({ cpu: [], memUsedKB: [], memTotalKB: 0, load1: [] })
       }
@@ -111,39 +124,39 @@ export function AppProvider({ children }: { children: React.ReactNode }): JSX.El
         return { cpu, memUsedKB, load1, memTotalKB: s.mem.totalKB }
       })
     })
-    // 加载已保存的设置并自动连接（未配置过地址则停在未连接状态）
-    void kd.getSettings().then((s) => {
-      setSettings(s)
-      if (s.host) {
-        setState('connecting')
-        kd.connect(s).catch(() => {})
-      }
+    const offDev = kd.onDevicesUpdated((store) => applyStore(store))
+    // 加载设备列表，自动连接上次使用的设备
+    void kd.devicesList().then((store) => {
+      applyStore(store)
     })
     return () => {
       off()
       offStats()
+      offDev()
     }
-  }, [])
+  }, [applyStore])
 
-  const connect = useCallback(async (s: ConnectionSettings) => {
-    setState('connecting')
-    setErr('')
-    await kd.saveSettings(s)
-    setSettings(s)
-    await kd.connect(s)
-  }, [])
+  const connectDevice = useCallback(
+    async (p: DeviceProfile) => {
+      setState('connecting')
+      setErr('')
+      setActiveId(p.id)
+      try {
+        await kd.disconnect()
+      } catch {
+        /* ignore */
+      }
+      await kd.connect(p)
+    },
+    []
+  )
 
   const disconnect = useCallback(async () => {
     await kd.disconnect()
   }, [])
 
-  const saveSettings = useCallback(async (s: ConnectionSettings) => {
-    await kd.saveSettings(s)
-    setSettings(s)
-  }, [])
-
   return (
-    <ConnContext.Provider value={{ state, err, settings, connect, disconnect, setSettings: saveSettings }}>
+    <ConnContext.Provider value={{ state, err, devices, activeId, connectDevice, disconnect, refreshDevices }}>
       <StatsContext.Provider value={{ stats, history }}>{children}</StatsContext.Provider>
     </ConnContext.Provider>
   )

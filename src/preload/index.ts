@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
-  ConnectionSettings,
+  DeviceProfile,
+  DeviceStore,
   ConnState,
   DeviceInfo,
   StatsSnapshot,
@@ -11,25 +12,43 @@ import type {
 } from '../shared/types'
 
 const api = {
-  // 连接
-  connect: (settings: ConnectionSettings) => ipcRenderer.invoke('kd:connect', settings),
+  // 连接（传入完整设备配置）
+  connect: (profile: DeviceProfile) => ipcRenderer.invoke('kd:connect', profile),
   disconnect: () => ipcRenderer.invoke('kd:disconnect'),
-  getSettings: (): Promise<ConnectionSettings> => ipcRenderer.invoke('kd:get-settings'),
-  saveSettings: (s: ConnectionSettings) => ipcRenderer.invoke('kd:save-settings', s),
   onState: (cb: (state: ConnState, err: string) => void) => {
     const l = (_e: unknown, state: ConnState, err: string) => cb(state, err)
     ipcRenderer.on('kd:state', l)
     return () => ipcRenderer.removeListener('kd:state', l)
   },
 
+  // 设备配置管理
+  devicesList: (): Promise<DeviceStore> => ipcRenderer.invoke('kd:devices-list'),
+  deviceSave: (profile: DeviceProfile, connectNow: boolean): Promise<DeviceStore> =>
+    ipcRenderer.invoke('kd:device-save', profile, connectNow),
+  deviceDelete: (id: string): Promise<DeviceStore> => ipcRenderer.invoke('kd:device-delete', id),
+  setLastActive: (id: string) => ipcRenderer.invoke('kd:set-last-active', id),
+  onDevicesUpdated: (cb: (store: DeviceStore) => void) => {
+    const l = (_e: unknown, store: DeviceStore) => cb(store)
+    ipcRenderer.on('kd:devices-updated', l)
+    return () => {
+      ipcRenderer.removeListener('kd:devices-updated', l)
+    }
+  },
+
+  // 通用
+  pickKeyFile: (): Promise<string | null> => ipcRenderer.invoke('kd:pick-key-file'),
+  openExternal: (url: string) => ipcRenderer.invoke('kd:open-external', url),
+  appVersion: (): Promise<string> => ipcRenderer.invoke('kd:app-version'),
+
   // 设备
   getDeviceInfo: (): Promise<DeviceInfo> => ipcRenderer.invoke('kd:device-info'),
+  getStorageInfo: (): Promise<import('../shared/types').StorageInfo[]> => ipcRenderer.invoke('kd:storage-info'),
   reboot: (): Promise<boolean> => ipcRenderer.invoke('kd:reboot'),
   listThreads: (pid: number): Promise<ThreadInfo[]> => ipcRenderer.invoke('kd:list-threads', pid),
   kill: (pid: number, sig: string): Promise<string> => ipcRenderer.invoke('kd:kill', pid, sig),
 
   // 性能
-  startStats: (intervalMs: number) => ipcRenderer.invoke('kd:stats-start', intervalMs),
+  startStats: (intervalMs: number, includeProcesses = false) => ipcRenderer.invoke('kd:stats-start', intervalMs, includeProcesses),
   stopStats: () => ipcRenderer.invoke('kd:stats-stop'),
   onStats: (cb: (s: StatsSnapshot) => void) => {
     const l = (_e: unknown, s: StatsSnapshot) => cb(s)

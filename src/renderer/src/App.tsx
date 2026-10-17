@@ -1,13 +1,24 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AppProvider, useConn } from './store'
 import Overview from './pages/Overview'
-import ScreenPage from './pages/ScreenPage'
 import Processes from './pages/Processes'
 import Files from './pages/Files'
 import Terminal from './pages/Terminal'
 import SettingsModal from './components/SettingsModal'
+import { kd } from './api'
+import type { DeviceProfile } from '../../shared/types'
 
-type Page = 'overview' | 'screen' | 'procs' | 'files' | 'term'
+type Page = 'overview' | 'procs' | 'files' | 'term'
+type ThemePref = 'auto' | 'light' | 'dark'
+
+const PROJECT_URL = 'https://github.com/IceThunder/kindledash'
+const REFRESH_OPTIONS = [
+  { label: '关闭', ms: 0 },
+  { label: '0.5 秒', ms: 500 },
+  { label: '1 秒', ms: 1000 },
+  { label: '2 秒', ms: 2000 },
+  { label: '5 秒', ms: 5000 }
+]
 
 const NAV: { id: Page; label: string; icon: JSX.Element }[] = [
   {
@@ -16,15 +27,6 @@ const NAV: { id: Page; label: string; icon: JSX.Element }[] = [
     icon: (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
         <path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zM0 8a8 8 0 1116 0A8 8 0 010 8zm6.5-.25A.75.75 0 017.25 7h1a.75.75 0 01.75.75v2.75h.25a.75.75 0 010 1.5h-2a.75.75 0 010-1.5h.25v-2h-.25a.75.75 0 01-.75-.75zM8 6a1 1 0 100-2 1 1 0 000 2z" />
-      </svg>
-    )
-  },
-  {
-    id: 'screen',
-    label: '屏幕镜像',
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-        <path d="M1.75 2.5h12.5a.75.75 0 01.75.75v7.5a.75.75 0 01-.75.75H1.75a.75.75 0 01-.75-.75v-7.5a.75.75 0 01.75-.75zM1.5 1A1.5 1.5 0 000 2.5v7.5A1.5 1.5 0 001.5 11.5H6v1H4.75a.75.75 0 000 1.5h6.5a.75.75 0 000-1.5H10v-1h4.5a1.5 1.5 0 001.5-1.5v-7.5A1.5 1.5 0 0014.5 1h-13z" />
       </svg>
     )
   },
@@ -57,57 +59,233 @@ const NAV: { id: Page; label: string; icon: JSX.Element }[] = [
   }
 ]
 
+function useTheme(): { theme: ThemePref; cycle: () => void; label: string } {
+  const [theme, setTheme] = useState<ThemePref>(() => {
+    const saved = localStorage.getItem('kd.theme')
+    return saved === 'light' || saved === 'dark' || saved === 'auto' ? saved : 'auto'
+  })
+  useEffect(() => {
+    localStorage.setItem('kd.theme', theme)
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const apply = () => {
+      const resolved =
+        theme === 'auto' ? (mq.matches ? 'dark' : 'light') : theme
+      document.documentElement.dataset.theme = resolved
+    }
+    apply()
+    const onChange = () => theme === 'auto' && apply()
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [theme])
+  const cycle = () => setTheme((t) => (t === 'auto' ? 'light' : t === 'light' ? 'dark' : 'auto'))
+  const label = theme === 'auto' ? '跟随系统' : theme === 'light' ? '浅色' : '深色'
+  return { theme, cycle, label }
+}
+
+function AboutModal({ onClose }: { onClose: () => void }): JSX.Element {
+  const [version, setVersion] = useState('')
+  useEffect(() => {
+    void kd.appVersion().then(setVersion)
+  }, [])
+  return (
+    <div className="modal-mask" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ width: 400, textAlign: 'center' }}>
+        <div style={{ fontSize: 44, marginBottom: 6 }}>📖</div>
+        <h3 style={{ marginBottom: 2 }}>KindleDash</h3>
+        <div style={{ color: 'var(--text-dim)', fontSize: 13, marginBottom: 14 }}>v{version || '…'}</div>
+        <div style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.8, marginBottom: 16 }}>
+          越狱 Kindle 管理工具 — 屏幕镜像 / 性能监控
+          <br />
+          进程线程 / 文件管理 / 远程终端
+          <br />
+          Electron + React + TypeScript · MIT
+        </div>
+        <button
+          className="btn"
+          onClick={() => void kd.openExternal(PROJECT_URL)}
+        >
+          GitHub 项目地址 ↗
+        </button>
+        <div className="form-actions" style={{ justifyContent: 'center' }}>
+          <button className="btn primary" onClick={onClose}>
+            关闭
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function Shell(): JSX.Element {
   const [page, setPage] = useState<Page>('overview')
-  const { state, err, settings } = useConn()
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  const { state, err, devices, activeId, connectDevice, disconnect } = useConn()
+  // undefined = 关闭设备编辑弹窗；null = 新增；DeviceProfile = 编辑
+  const [modal, setModal] = useState<DeviceProfile | null | undefined>(undefined)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [aboutOpen, setAboutOpen] = useState(false)
+  const { cycle, label } = useTheme()
+  const [screenInterval, setScreenInterval] = useState(() =>
+    parseInt(localStorage.getItem('kd.screen.interval') ?? '5000', 10)
+  )
+
+  // Kindle 端性能脚本会扫描整个 /proc，只有总览和进程页可见时才轮询。
+  // 3 秒一拍足够观察趋势，也避免文件/终端页面在后台持续占用 SSH 通道。
+  useEffect(() => {
+    if (state !== 'connected' || (page !== 'overview' && page !== 'procs')) {
+      void kd.stopStats()
+      return
+    }
+    const timer = window.setTimeout(() => {
+      void kd.startStats(3000, page === 'procs')
+    }, 1200)
+    return () => {
+      window.clearTimeout(timer)
+      void kd.stopStats()
+    }
+  }, [state, page])
+
+  const changeInterval = (ms: number) => {
+    setScreenInterval(ms)
+    localStorage.setItem('kd.screen.interval', String(ms))
+  }
 
   const stateText =
-    state === 'connected'
-      ? `已连接 ${settings?.host ?? ''}`
-      : state === 'connecting'
-        ? '连接中…'
-        : state === 'reconnecting'
-          ? '重连中…'
-          : state === 'error'
-            ? '连接失败'
-            : '未连接'
-  const dotClass =
-    state === 'connected' ? 'ok' : state === 'disconnected' ? 'bad' : 'pending'
+    state === 'connected' ? '已连接' : state === 'connecting' ? '连接中…' : state === 'reconnecting' ? '重连中…' : state === 'error' ? '连接失败' : '未连接'
+  const dotClass = state === 'connected' ? 'ok' : state === 'disconnected' ? 'bad' : 'pending'
+  const activeDevice = devices.find((d) => d.id === activeId)
 
   return (
     <div className="app">
       <div className="titlebar-drag" />
       <aside className="sidebar">
         {NAV.map((n) => (
-          <button
-            key={n.id}
-            className={`nav-item ${page === n.id ? 'active' : ''}`}
-            onClick={() => setPage(n.id)}
-          >
+          <button key={n.id} className={`nav-item ${page === n.id ? 'active' : ''}`} onClick={() => setPage(n.id)}>
             {n.icon}
             {n.label}
           </button>
         ))}
+
+        <div className="device-section">
+          <div className="device-header">
+            我的设备
+            <button className="device-add" title="添加设备" onClick={() => setModal(null)}>
+              ＋
+            </button>
+          </div>
+          {devices.map((d) => {
+            const isActive = d.id === activeId
+            return (
+              <div
+                key={d.id}
+                className={`device-item ${isActive ? 'active' : ''}`}
+                title={isActive ? '当前设备' : '双击设备名称连接'}
+              >
+                <span className={`status-dot ${isActive ? dotClass : 'bad'}`} />
+                <span
+                  className="device-name"
+                  title={d.deviceName ? d.deviceName : d.name || d.host}
+                  onDoubleClick={() => !isActive && void connectDevice(d)}
+                >
+                  {d.name || d.host}
+                </span>
+                <button
+                  className="device-edit"
+                  title="编辑"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setModal(d)
+                  }}
+                >
+                  ✎
+                </button>
+              </div>
+            )
+          })}
+          {!devices.length && (
+            <div className="device-empty" onClick={() => setModal(null)}>
+              ＋ 添加第一台设备
+            </div>
+          )}
+        </div>
+
         <div className="sidebar-footer">
           <div>
             <span className={`status-dot ${dotClass}`} />
             {stateText}
+            {activeDevice ? ` · ${activeDevice.host}` : ''}
           </div>
           {err && <div style={{ color: 'var(--red)', marginTop: 4, fontSize: 11 }}>{err}</div>}
-          <button className="btn small" style={{ marginTop: 8, width: '100%' }} onClick={() => setSettingsOpen(true)}>
-            ⚙ 连接设置
-          </button>
+          <div className="footer-btns">
+            <button
+              className="btn small footer-btn"
+              onClick={cycle}
+              title={`主题：${label}（点击切换）`}
+            >
+              {label === '跟随系统' ? '◐' : label === '浅色' ? '☀' : '☾'}
+            </button>
+            <button
+              className="btn small footer-btn footer-disconnect"
+              onClick={() => void disconnect()}
+              title="快速断开连接"
+              aria-label="快速断开连接"
+              disabled={state === 'disconnected'}
+            >
+              ⏻
+            </button>
+            <button
+              className="btn small footer-btn"
+              onClick={() => setMenuOpen((v) => !v)}
+              title="设置"
+            >
+              ⚙
+            </button>
+          </div>
+
+          {menuOpen && (
+            <>
+              <div className="menu-mask" onClick={() => setMenuOpen(false)} />
+              <div className="menu-popover">
+                <div className="menu-label">屏幕刷新间隔</div>
+                <div className="menu-intervals">
+                  {REFRESH_OPTIONS.map((o) => (
+                    <button
+                      key={o.ms}
+                      className={`btn small ${screenInterval === o.ms ? 'primary' : ''}`}
+                      onClick={() => changeInterval(o.ms)}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="menu-sep" />
+                <div className="menu-item disabled" title="下一阶段开发">
+                  日志
+                  <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>未开放</span>
+                </div>
+                <div className="menu-sep" />
+                <div className="menu-item" onClick={() => { setMenuOpen(false); setAboutOpen(true) }}>
+                  关于 KindleDash
+                </div>
+                <div
+                  className="menu-item"
+                  onClick={() => { setMenuOpen(false); void kd.openExternal(PROJECT_URL) }}
+                >
+                  项目地址
+                  <span style={{ color: 'var(--text-faint)' }}>↗</span>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </aside>
       <main className="content">
-        {page === 'overview' && <Overview />}
-        {page === 'screen' && <ScreenPage />}
+        {page === 'overview' && <Overview screenInterval={screenInterval} />}
         {page === 'procs' && <Processes />}
         {page === 'files' && <Files />}
         {page === 'term' && <Terminal />}
       </main>
-      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+      {modal !== undefined && <SettingsModal editing={modal} onClose={() => setModal(undefined)} />}
+      {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
     </div>
   )
 }

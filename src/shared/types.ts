@@ -11,6 +11,21 @@ export interface ConnectionSettings {
   keepAwake: boolean
 }
 
+/** 已保存的设备连接配置（多设备管理） */
+export interface DeviceProfile extends ConnectionSettings {
+  id: string
+  /** 显示名称，如「客厅的 Kindle」 */
+  name: string
+  /** 最近一次连接成功的设备名（来自设备本身），用于默认命名 */
+  deviceName?: string
+}
+
+export interface DeviceStore {
+  devices: DeviceProfile[]
+  /** 启动时自动连接的设备 */
+  lastActiveId: string | null
+}
+
 export type ConnState =
   | 'disconnected'
   | 'connecting'

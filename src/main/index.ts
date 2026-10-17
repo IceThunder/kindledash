@@ -1,14 +1,15 @@
-import { app, BrowserWindow, ipcMain, dialog, Menu, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, Menu, shell, powerMonitor } from 'electron'
 import { statSync } from 'fs'
 import { join } from 'path'
-import { writeFile } from 'fs/promises'
+import { writeFile, readFile, appendFile } from 'fs/promises'
+import { randomUUID } from 'crypto'
 import { KindleSSH } from './kindle'
 import { ScreenService } from './screen'
-import { STATS_SCRIPT, parseStatsOutput, fetchDeviceInfo, fetchThreads, type ParsedStat } from './stats'
+import { STATS_SCRIPT, STATS_LIGHT_SCRIPT, parseStatsOutput, fetchDeviceInfo, fetchStorageInfo, fetchThreads, type ParsedStat } from './stats'
 import { FileService } from './files'
-import type { ConnectionSettings, StatsSnapshot, TransferProgress, ScreenFrame, ConnState } from '../shared/types'
+import type { DeviceProfile, DeviceStore, StatsSnapshot, TransferProgress, ScreenFrame, ConnState } from '../shared/types'
 
-const DEFAULT_SETTINGS: ConnectionSettings = {
+const EMPTY_PROFILE: Omit<DeviceProfile, 'id' | 'name'> = {
   host: '',
   port: 22,
   username: 'root',
@@ -18,10 +19,66 @@ const DEFAULT_SETTINGS: ConnectionSettings = {
   keepAwake: true
 }
 
+// ---------- 简单文件日志（连接问题排查用） ----------
+
+function appendLog(line: string): void {
+  const ts = new Date().toISOString()
+  const out = `[${ts}] ${line}\n`
+  console.log(out.trim())
+  void appendFile(join(app.getPath('userData'), 'kindledash.log'), out).catch(() => {})
+}
+
+// ---------- 设备配置持久化（userData/devices.json） ----------
+
+function devicesPath(): string {
+  return join(app.getPath('userData'), 'devices.json')
+}
+
+function legacySettingsPath(): string {
+  return join(app.getPath('userData'), 'settings.json')
+}
+
+let deviceStore: DeviceStore = { devices: [], lastActiveId: null }
+
+async function loadDeviceStore(): Promise<DeviceStore> {
+  try {
+    const data = JSON.parse(await readFile(devicesPath(), 'utf8'))
+    if (Array.isArray(data.devices)) {
+      deviceStore = { devices: data.devices, lastActiveId: data.lastActiveId ?? null }
+      return deviceStore
+    }
+  } catch {
+    /* 首次运行或文件损坏，走迁移 */
+  }
+  // 旧版单设备 settings.json → 迁移为第一个设备配置
+  try {
+    const legacy = JSON.parse(await readFile(legacySettingsPath(), 'utf8'))
+    if (legacy && legacy.host) {
+      const profile: DeviceProfile = {
+        ...EMPTY_PROFILE,
+        ...legacy,
+        id: randomUUID(),
+        name: `Kindle (${legacy.host})`
+      }
+      deviceStore = { devices: [profile], lastActiveId: profile.id }
+      await saveDeviceStore()
+      return deviceStore
+    }
+  } catch {
+    /* 无旧配置 */
+  }
+  deviceStore = { devices: [], lastActiveId: null }
+  return deviceStore
+}
+
+async function saveDeviceStore(): Promise<void> {
+  await writeFile(devicesPath(), JSON.stringify(deviceStore, null, 2))
+}
+
 // 连接期间阻止 Kindle 自动休眠（休眠会断开 WiFi 导致 SSH 掉线）
 const KEEP_AWAKE_ON = '/usr/bin/lipc-set-prop com.lab126.powerd preventScreenSaver 1'
 const KEEP_AWAKE_OFF = '/usr/bin/lipc-set-prop com.lab126.powerd preventScreenSaver 0'
-let currentSettings: ConnectionSettings = { ...DEFAULT_SETTINGS }
+let currentSettings: DeviceProfile | null = null
 
 let mainWindow: BrowserWindow | null = null
 const ssh = new KindleSSH()
@@ -42,20 +99,6 @@ function send(ch: string, ...args: unknown[]): void {
   }
 }
 
-async function loadSettings(): Promise<ConnectionSettings> {
-  try {
-    const { readFile } = await import('fs/promises')
-    const data = JSON.parse(await readFile(join(app.getPath('userData'), 'settings.json'), 'utf8'))
-    return { ...DEFAULT_SETTINGS, ...data }
-  } catch {
-    return { ...DEFAULT_SETTINGS }
-  }
-}
-
-async function saveSettings(s: ConnectionSettings): Promise<void> {
-  await writeFile(join(app.getPath('userData'), 'settings.json'), JSON.stringify(s, null, 2))
-}
-
 function stopStats(): void {
   if (statsTimer) clearInterval(statsTimer)
   statsTimer = null
@@ -63,7 +106,7 @@ function stopStats(): void {
   prevProcs = null
 }
 
-function startStats(intervalMs: number): void {
+function startStats(intervalMs: number, includeProcesses = false): void {
   stopStats()
   if (intervalMs <= 0) return
   let busy = false
@@ -73,7 +116,7 @@ function startStats(intervalMs: number): void {
     if (ssh.state !== 'connected' || busy) return
     busy = true
     try {
-      const raw = await ssh.execText(STATS_SCRIPT)
+      const raw = await ssh.execText(includeProcesses ? STATS_SCRIPT : STATS_LIGHT_SCRIPT)
       const snap = parseStatsOutput(raw, prevCpu, prevProcs)
       if (process.env.KD_DEBUG) console.log(`[stats] cpu%=${snap?.cpuPercent} load=${snap?.load?.join(',')} memUsed=${snap?.mem?.usedKB} rawLen=${raw.length}`)
       if (snap) {
@@ -93,7 +136,7 @@ function startStats(intervalMs: number): void {
 
 /** 恢复设备自动休眠（断开/退出前调用） */
 async function restoreKeepAwake(): Promise<void> {
-  if (ssh.state === 'connected' && currentSettings.keepAwake) {
+  if (ssh.state === 'connected' && currentSettings?.keepAwake) {
     try {
       await ssh.exec(KEEP_AWAKE_OFF, 3000)
     } catch {
@@ -115,10 +158,11 @@ function resetTerminal(): void {
 
 ssh.on('state', (state: ConnState, err: string) => {
   send('kd:state', state, err)
+  appendLog(`连接状态: ${state}${err ? ` — ${err}` : ''}`)
   if (state === 'connected') {
     fileService = new FileService(ssh, (p: TransferProgress) => send('kd:transfer-progress', p))
     screenService.bind(ssh)
-    if (currentSettings.keepAwake) {
+    if (currentSettings?.keepAwake) {
       void ssh.exec(KEEP_AWAKE_ON, 5000).catch(() => {})
     }
     if (pendingScreenInterval > 0) {
@@ -134,6 +178,7 @@ ssh.on('state', (state: ConnState, err: string) => {
     resetTerminal()
   }
 })
+ssh.on('warmup', (ok: boolean) => appendLog(`系统 SSH 预热: ${ok ? '成功' : '失败'}`))
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -161,7 +206,7 @@ function createWindow(): void {
       const { mkdir } = await import('fs/promises')
       await mkdir(shotDir, { recursive: true })
       await new Promise((r) => setTimeout(r, 6000))
-      const tabs = ['overview', 'screen', 'procs', 'files', 'term']
+      const tabs = ['overview', 'procs', 'files', 'term']
       for (let i = 0; i < tabs.length; i++) {
         if (!mainWindow) break
         try {
@@ -198,6 +243,27 @@ function createWindow(): void {
           console.log(`[tour] failed ${tabs[i]}:`, (e as Error).message)
         }
       }
+      // 验证设置菜单与亮色主题
+      try {
+        await mainWindow.webContents.executeJavaScript(`[...document.querySelectorAll('.footer-btn')].find(b=>b.textContent?.includes('⚙'))?.click()`)
+        await new Promise((r) => setTimeout(r, 900))
+        const menuShot = await mainWindow.webContents.capturePage()
+        await writeFile(join(shotDir, 'page-menu.png'), menuShot.toPNG())
+        console.log('[tour] captured menu')
+        await mainWindow.webContents.executeJavaScript(`[...document.querySelectorAll('.footer-btn')].find(b=>b.textContent?.includes('⚙'))?.click()`)
+        // 主题切到浅色再截一张总览
+        await mainWindow.webContents.executeJavaScript(`[...document.querySelectorAll('.footer-btn')].find(b=>b.textContent?.match(/◐|☀|☾/))?.click()`)
+        await new Promise((r) => setTimeout(r, 400))
+        await mainWindow.webContents.executeJavaScript(`[...document.querySelectorAll('.footer-btn')].find(b=>b.textContent?.match(/◐|☀|☾/))?.click()`)
+        await new Promise((r) => setTimeout(r, 900))
+        await mainWindow.webContents.executeJavaScript(`document.querySelectorAll('.nav-item')[0]?.click()`)
+        await new Promise((r) => setTimeout(r, 2500))
+        const lightShot = await mainWindow.webContents.capturePage()
+        await writeFile(join(shotDir, 'page-light.png'), lightShot.toPNG())
+        console.log('[tour] captured light theme')
+      } catch (e) {
+        console.log('[tour] menu/theme failed:', (e as Error).message)
+      }
       console.log('[tour] done')
     })()
   }
@@ -232,33 +298,91 @@ Menu.setApplicationMenu(
 
 // ---------- IPC ----------
 
-ipcMain.handle('kd:connect', async (_e, settings: ConnectionSettings) => {
-  currentSettings = settings
-  await ssh.connectAndRemember(settings)
+ipcMain.handle('kd:connect', async (_e, profile: DeviceProfile) => {
+  currentSettings = profile
+  deviceStore.lastActiveId = profile.id
+  await saveDeviceStore()
+  await ssh.connectAndRemember(profile)
   return true
 })
 
 ipcMain.handle('kd:disconnect', async () => {
   pendingScreenInterval = 0
   screenService.stop()
-  await restoreKeepAwake()
+  // 注意：此处不恢复设备自动休眠——断开后若允许 Kindle 休眠，
+  // 其 WiFi 会停止应答导致后续连接失败（EHOSTUNREACH），仅应用退出时恢复
   ssh.disconnect()
   return true
 })
 
-ipcMain.handle('kd:get-settings', async () => {
-  currentSettings = await loadSettings()
-  return currentSettings
+// ---------- 设备配置 CRUD ----------
+
+ipcMain.handle('kd:devices-list', () => deviceStore)
+
+ipcMain.handle('kd:device-save', async (_e, profile: DeviceProfile, connectNow: boolean) => {
+  const i = deviceStore.devices.findIndex((d) => d.id === profile.id)
+  if (i >= 0) {
+    deviceStore.devices[i] = profile
+  } else {
+    deviceStore.devices.push(profile)
+  }
+  await saveDeviceStore()
+  if (connectNow) {
+    currentSettings = profile
+    deviceStore.lastActiveId = profile.id
+    await saveDeviceStore()
+    await ssh.connectAndRemember(profile)
+  }
+  return deviceStore
 })
-ipcMain.handle('kd:save-settings', (_e, s: ConnectionSettings) => {
-  currentSettings = s
-  return saveSettings(s)
+
+ipcMain.handle('kd:device-delete', async (_e, id: string) => {
+  deviceStore.devices = deviceStore.devices.filter((d) => d.id !== id)
+  if (deviceStore.lastActiveId === id) deviceStore.lastActiveId = null
+  await saveDeviceStore()
+  if (currentSettings && (currentSettings as DeviceProfile).id === id) {
+    pendingScreenInterval = 0
+    screenService.stop()
+    ssh.disconnect()
+  }
+  return deviceStore
+})
+
+// ---------- 通用 ----------
+
+ipcMain.handle('kd:pick-key-file', async () => {
+  const win = BrowserWindow.getFocusedWindow() ?? mainWindow
+  const { canceled, filePaths } = await dialog.showOpenDialog(win!, {
+    title: '选择 SSH 私钥文件',
+    properties: ['openFile'],
+    filters: [
+      { name: '私钥文件', extensions: ['pem', 'key', 'id_rsa', 'id_ed25519', 'openssh'] },
+      { name: '所有文件', extensions: ['*'] }
+    ]
+  })
+  return canceled || !filePaths.length ? null : filePaths[0]
+})
+
+ipcMain.handle('kd:open-external', (_e, url: string) => {
+  if (/^https:\/\//.test(url)) void shell.openExternal(url)
+  return true
+})
+
+ipcMain.handle('kd:app-version', () => app.getVersion())
+
+ipcMain.handle('kd:set-last-active', async (_e, id: string) => {
+  deviceStore.lastActiveId = id
+  await saveDeviceStore()
+  return true
 })
 
 ipcMain.handle('kd:device-info', async () => fetchDeviceInfo(ssh))
+ipcMain.handle('kd:storage-info', async () => fetchStorageInfo(ssh))
 
-ipcMain.handle('kd:stats-start', (_e, intervalMs: number) => {
-  startStats(Math.max(500, intervalMs))
+ipcMain.handle('kd:stats-start', (_e, intervalMs: number, includeProcesses = false) => {
+  // The stats command scans /proc/[0-9]*/stat and is relatively expensive on
+  // older Kindles. Keep a safe floor even if an old renderer requests 500ms.
+  startStats(Math.max(2000, intervalMs), includeProcesses)
   return true
 })
 ipcMain.handle('kd:stats-stop', () => {
@@ -414,7 +538,10 @@ function statSyncSafe(p: string): import('fs').Stats | null {
 
 // ---------- 生命周期 ----------
 
-void app.whenReady().then(() => {
+void app.whenReady().then(async () => {
+  await loadDeviceStore()
+  powerMonitor.on('resume', () => ssh.retryNow())
+  powerMonitor.on('unlock-screen', () => ssh.retryNow())
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -436,3 +563,5 @@ app.on('before-quit', (e) => {
     app.quit()
   })
 })
+
+// Mac 睡眠唤醒/解锁后网络需要几秒才就绪，此时立即触发重连并重置退避

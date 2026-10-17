@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { kd } from '../api'
 import { useConn, useStats, fmtKB, STATE_LABEL, STATE_COLOR } from '../store'
-import { ConfirmDialog } from '../components/ui'
+import { ConfirmDialog, Sparkline, Ring } from '../components/ui'
 import type { ProcInfo, ThreadInfo } from '../../../shared/types'
 
 type SortKey = 'cpu' | 'mem' | 'pid' | 'name' | 'threads'
 
 export default function Processes(): JSX.Element {
   const { state } = useConn()
-  const { stats } = useStats()
+  const { stats, history } = useStats()
   const [filter, setFilter] = useState('')
   const [hideKernel, setHideKernel] = useState(false)
   const [sortKey, setSortKey] = useState<SortKey>('cpu')
@@ -34,7 +34,17 @@ export default function Processes(): JSX.Element {
     return () => {
       alive = false
     }
-  }, [selected, stats?.ts])
+  }, [selected])
+
+  const refreshThreads = () => {
+    if (selected == null) return
+    setThreadsLoading(true)
+    void kd
+      .listThreads(selected)
+      .then(setThreads)
+      .catch(() => setThreads(null))
+      .finally(() => setThreadsLoading(false))
+  }
 
   const procs = useMemo(() => {
     let list = stats?.procs ?? []
@@ -89,6 +99,38 @@ export default function Processes(): JSX.Element {
         <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--text-dim)' }}>
           {stats ? `${stats.procs.length} 个进程` : '等待数据…'}
         </span>
+      </div>
+
+      <div className="process-telemetry">
+        <div className="card">
+          <div className="card-title">CPU 使用率</div>
+          {stats ? (
+            <>
+              <Sparkline data={history.cpu} max={100} color="#58a6ff" height={105} />
+              <div className="process-telemetry-caption">
+                <span>最近 {history.cpu.length} 秒</span>
+                <span>负载 {stats.load.map((l) => l.toFixed(2)).join(' / ')}</span>
+              </div>
+            </>
+          ) : <div className="empty" style={{ padding: 30 }}>等待数据…</div>}
+        </div>
+        <div className="card">
+          <div className="card-title">内存明细</div>
+          {stats?.mem ? (() => {
+            const mem = stats.mem
+            const usedPct = mem.totalKB ? (mem.usedKB / mem.totalKB) * 100 : 0
+            const cachePct = mem.totalKB ? (mem.cachedKB / mem.totalKB) * 100 : 0
+            const swapUsedKB = mem.swapTotalKB - mem.swapFreeKB
+            const swapPct = mem.swapTotalKB ? (swapUsedKB / mem.swapTotalKB) * 100 : 0
+            return <div className="process-memory-rings">
+              <Ring percent={usedPct} label="应用使用" value={`${Math.round(usedPct)}%`} color="#bc8cff" size={88} />
+              <Ring percent={cachePct} label="缓存" value={fmtKB(mem.cachedKB)} color="#58a6ff" size={88} />
+              <Ring percent={mem.totalKB ? (mem.buffersKB / mem.totalKB) * 100 : 0} label="Buffers" value={fmtKB(mem.buffersKB)} color="#d29922" size={88} />
+              <Ring percent={swapPct} label="Swap" value={fmtKB(swapUsedKB)} color={swapPct > 60 ? '#f85149' : '#3fb950'} size={88} />
+              <Ring percent={mem.totalKB ? (mem.freeKB / mem.totalKB) * 100 : 0} label="空闲" value={fmtKB(mem.freeKB)} color="#8b949e" size={88} />
+            </div>
+          })() : <div className="empty" style={{ padding: 30 }}>等待数据…</div>}
+        </div>
       </div>
 
       <div className="file-toolbar">
@@ -161,6 +203,9 @@ export default function Processes(): JSX.Element {
             <>
               <div className="card-title">
                 进程详情
+                <button className="btn small" style={{ float: 'right', marginRight: 6 }} onClick={refreshThreads} disabled={threadsLoading}>
+                  {threadsLoading ? '读取中…' : '刷新线程'}
+                </button>
                 <button className="btn small" style={{ float: 'right' }} onClick={() => setSelected(null)}>
                   关闭
                 </button>

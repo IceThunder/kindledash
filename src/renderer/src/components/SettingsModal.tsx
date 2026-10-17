@@ -1,40 +1,65 @@
 import { useEffect, useState } from 'react'
 import { useConn } from '../store'
 import { kd } from '../api'
-import type { ConnectionSettings } from '../../../shared/types'
+import type { DeviceProfile } from '../../../shared/types'
+import { ConfirmDialog } from './ui'
 
-export default function SettingsModal({ onClose }: { onClose: () => void }): JSX.Element {
-  const { settings, connect, disconnect, state } = useConn()
-  const [form, setForm] = useState<ConnectionSettings>(
-    settings ?? {
-      host: '',
-      port: 22,
-      username: 'root',
-      authMethod: 'key',
-      privateKeyPath: '',
-      password: '',
-      keepAwake: true
-    }
+const EMPTY_FORM: Omit<DeviceProfile, 'id'> = {
+  name: '',
+  host: '',
+  port: 22,
+  username: 'root',
+  authMethod: 'key',
+  privateKeyPath: '',
+  password: '',
+  keepAwake: true
+}
+
+export default function SettingsModal({
+  editing,
+  onClose
+}: {
+  /** null = 新增设备；DeviceProfile = 编辑该设备 */
+  editing: DeviceProfile | null
+  onClose: () => void
+}): JSX.Element {
+  const { connectDevice, refreshDevices } = useConn()
+  const [form, setForm] = useState<DeviceProfile>(
+    editing ?? { ...EMPTY_FORM, id: crypto.randomUUID(), name: '' }
   )
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   useEffect(() => {
     setError('')
   }, [form.host, form.port, form.username, form.authMethod, form.privateKeyPath, form.password])
 
-  const set = (patch: Partial<ConnectionSettings>) => setForm((f) => ({ ...f, ...patch }))
+  const set = (patch: Partial<DeviceProfile>) => setForm((f) => ({ ...f, ...patch }))
 
-  const handleConnect = async () => {
+  const pickKey = async () => {
+    const p = await kd.pickKeyFile()
+    if (p) set({ privateKeyPath: p })
+  }
+
+  const save = async (connectNow: boolean) => {
+    if (!form.host.trim()) {
+      setError('请填写设备地址')
+      return
+    }
     setBusy(true)
     setError('')
     try {
-      await disconnect()
-    } catch {
-      /* ignore */
-    }
-    try {
-      await connect(form)
+      if (connectNow) {
+        try {
+          await kd.disconnect()
+        } catch {
+          /* ignore */
+        }
+      }
+      const store = await kd.deviceSave(form, connectNow)
+      await refreshDevices(store)
+      if (connectNow) await connectDevice(form)
       onClose()
     } catch (e) {
       setError((e as Error).message)
@@ -43,10 +68,26 @@ export default function SettingsModal({ onClose }: { onClose: () => void }): JSX
     }
   }
 
+  const doDelete = async () => {
+    setConfirmDelete(false)
+    const store = await kd.deviceDelete(form.id)
+    await refreshDevices(store)
+    onClose()
+  }
+
   return (
     <div className="modal-mask" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal">
-        <h3>连接设置</h3>
+        <h3>{editing ? '编辑设备' : '添加设备'}</h3>
+        <div className="form-row">
+          <label>设备名称（便于区分多台 Kindle）</label>
+          <input
+            className="input"
+            value={form.name}
+            onChange={(e) => set({ name: e.target.value })}
+            placeholder="例如 客厅的 Kindle"
+          />
+        </div>
         <div className="form-row">
           <label>设备地址（IP）</label>
           <input
@@ -73,7 +114,11 @@ export default function SettingsModal({ onClose }: { onClose: () => void }): JSX
         </div>
         <div className="form-row">
           <label>认证方式</label>
-          <select className="input" value={form.authMethod} onChange={(e) => set({ authMethod: e.target.value as 'key' | 'password' })}>
+          <select
+            className="input"
+            value={form.authMethod}
+            onChange={(e) => set({ authMethod: e.target.value as 'key' | 'password' })}
+          >
             <option value="key">SSH 私钥</option>
             <option value="password">密码</option>
           </select>
@@ -81,12 +126,18 @@ export default function SettingsModal({ onClose }: { onClose: () => void }): JSX
         {form.authMethod === 'key' ? (
           <div className="form-row">
             <label>私钥路径（本机）</label>
-            <input
-              className="input mono"
-              value={form.privateKeyPath}
-              onChange={(e) => set({ privateKeyPath: e.target.value })}
-              placeholder="例如 ~/.ssh/id_rsa"
-            />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                className="input mono"
+                style={{ flex: 1 }}
+                value={form.privateKeyPath}
+                onChange={(e) => set({ privateKeyPath: e.target.value })}
+                placeholder="例如 ~/.ssh/id_rsa"
+              />
+              <button className="btn" onClick={() => void pickKey()} title="从本机选择私钥文件">
+                浏览…
+              </button>
+            </div>
           </div>
         ) : (
           <div className="form-row">
@@ -98,9 +149,6 @@ export default function SettingsModal({ onClose }: { onClose: () => void }): JSX
               onChange={(e) => set({ password: e.target.value })}
             />
           </div>
-        )}
-        {error && (
-          <div style={{ color: 'var(--red)', fontSize: 12, marginTop: 6 }}>连接失败：{error}</div>
         )}
         <div className="form-row" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <input
@@ -114,26 +162,38 @@ export default function SettingsModal({ onClose }: { onClose: () => void }): JSX
             <span style={{ color: 'var(--text-faint)' }}>（防止 Kindle 自动休眠导致频繁断连）</span>
           </label>
         </div>
-        <div className="form-actions">
-          {state === 'connected' && (
-            <button
-              className="btn"
-              onClick={async () => {
-                await kd.saveSettings(form)
-                await disconnect()
-                onClose()
-              }}
-            >
-              仅保存并断开
+        {error && <div style={{ color: 'var(--red)', fontSize: 12, marginTop: 6 }}>连接失败：{error}</div>}
+        <div className="form-actions" style={{ justifyContent: 'space-between' }}>
+          <div>
+            {editing && (
+              <button className="btn danger" onClick={() => setConfirmDelete(true)}>
+                删除
+              </button>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn" onClick={onClose}>
+              取消
             </button>
-          )}
-          <button className="btn" onClick={onClose}>
-            取消
-          </button>
-          <button className="btn primary" disabled={busy || !form.host} onClick={handleConnect}>
-            {busy ? '连接中…' : '保存并连接'}
-          </button>
+            <button className="btn" disabled={busy || !form.host} onClick={() => void save(false)}>
+              保存
+            </button>
+            <button className="btn primary" disabled={busy || !form.host} onClick={() => void save(true)}>
+              {busy ? '连接中…' : '保存并连接'}
+            </button>
+          </div>
         </div>
+
+        {confirmDelete && (
+          <ConfirmDialog
+            title={`删除设备「${form.name || form.host}」`}
+            body={<>只删除本机的连接记录，不影响设备本身。确定删除吗？</>}
+            confirmText="删除"
+            danger
+            onConfirm={() => void doDelete()}
+            onCancel={() => setConfirmDelete(false)}
+          />
+        )}
       </div>
     </div>
   )

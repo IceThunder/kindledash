@@ -8,14 +8,39 @@ export const STATS_SCRIPT = [
   'echo "#L"; cat /proc/loadavg',
   'echo "#M"; head -n 16 /proc/meminfo',
   'echo "#B"; cat /sys/devices/system/yoshi_battery/yoshi_battery0/battery_capacity /sys/devices/system/yoshi_battery/yoshi_battery0/battery_voltage /sys/devices/system/yoshi_battery/yoshi_battery0/battery_temperature /sys/devices/system/yoshi_battery/yoshi_battery0/battery_current 2>/dev/null',
-  'echo "#D"; df -k | grep -v tmpfs',
   'echo "#P"; cat /proc/[0-9]*/stat 2>/dev/null',
+  'echo "#END"'
+].join('; ')
+
+// 总览页只需要 CPU/内存/电池/磁盘；扫描所有进程的 stat 文件是 Kindle
+// 上最重的一步，留给进程页按需启用。
+export const STATS_LIGHT_SCRIPT = [
+  'echo "#U"; cat /proc/uptime',
+  'echo "#S"; head -n 2 /proc/stat',
+  'echo "#L"; cat /proc/loadavg',
+  'echo "#M"; head -n 16 /proc/meminfo',
+  'echo "#B"; cat /sys/devices/system/yoshi_battery/yoshi_battery0/battery_capacity /sys/devices/system/yoshi_battery/yoshi_battery0/battery_voltage /sys/devices/system/yoshi_battery/yoshi_battery0/battery_temperature /sys/devices/system/yoshi_battery/yoshi_battery0/battery_current 2>/dev/null',
   'echo "#END"'
 ].join('; ')
 
 export interface ParsedStat {
   total: number
   idle: number
+}
+
+export function parseStorageOutput(raw: string): StorageInfo[] {
+  const out: StorageInfo[] = []
+  for (const line of raw.trim().split('\n').slice(1)) {
+    const f = line.trim().split(/\s+/)
+    if (f.length < 6) continue
+    out.push({
+      mount: f[5],
+      totalKB: parseInt(f[1], 10),
+      usedKB: parseInt(f[2], 10),
+      availKB: parseInt(f[3], 10)
+    })
+  }
+  return out
 }
 
 export function parseCpuStatLine(line: string): ParsedStat {
@@ -237,6 +262,10 @@ export async function fetchDeviceInfo(ssh: KindleSSH): Promise<DeviceInfo> {
     deviceName: (sections['#N'] ?? '').trim() || undefined,
     cmdline: (sections['#M'] ?? '').trim()
   }
+}
+
+export async function fetchStorageInfo(ssh: KindleSSH): Promise<StorageInfo[]> {
+  return parseStorageOutput(await ssh.execText('df -k | grep -v tmpfs'))
 }
 
 /** 读取某进程的全部线程 */

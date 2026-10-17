@@ -33,7 +33,7 @@ export function Sparkline({
       <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: '100%', height: H, display: 'block' }}>
         {showGrid &&
           [0.25, 0.5, 0.75].map((f) => (
-            <line key={f} x1={0} x2={W} y1={H * f} y2={H * f} stroke="#21262d" strokeWidth="1" />
+            <line key={f} x1={0} x2={W} y1={H * f} y2={H * f} style={{ stroke: 'var(--border)' }} strokeWidth="1" />
           ))}
         {n > 1 && (
           <>
@@ -86,7 +86,7 @@ export function Ring({
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, width: size }}>
       <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
         <svg width={size} height={size} style={{ transform: 'rotate(-90deg)', display: 'block' }}>
-          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#21262d" strokeWidth="10" />
+          <circle cx={size / 2} cy={size / 2} r={r} fill="none" style={{ stroke: 'var(--bg-hover)' }} strokeWidth="10" />
           <circle
             cx={size / 2}
             cy={size / 2}
