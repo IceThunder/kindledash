@@ -205,11 +205,15 @@ const DEVICE_SCRIPT = [
   'echo "#N"; /usr/bin/lipc-get-prop com.lab126.sysinfo deviceName 2>/dev/null',
   'echo "#R"; head -n 3 /proc/meminfo',
   'echo "#END"'
-].join('; ')
+  // 各段之间补一个空行：/proc/usid、/proc/cmdline 输出不带换行，
+  // 否则 echo 的 #C/#N 标记会被粘在上一段末尾，导致 cpuinfo 等整段解析不到
+  // （usid 值本身还以 #C 校验和结尾，更容易踩中）
+].join('; echo; ')
 
-// MX50 板型 → 机型名（Paperwhite 2/3/Voyage 同系），按子串匹配 Hardware 字段
+// 板型 → 机型名（按子串匹配 Hardware 字段）。
+// MX50/YOSHIME 平台覆盖 Kindle Touch 与 Paperwhite 1（本机 FW 5.6.1.1 即 PW1），无法进一步区分
 const HARDWARE_MODELS: [string, string][] = [
-  ['YOSHIME', 'Kindle Paperwhite 2'],
+  ['YOSHIME', 'Kindle Paperwhite 1 / Touch'],
   ['WARIO', 'Kindle Paperwhite 3'],
   ['RENAUD', 'Kindle Voyage'],
   ['ICEWINE', 'Kindle Basic 2 (KT2)'],
