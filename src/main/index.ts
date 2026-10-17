@@ -7,7 +7,8 @@ import { KindleSSH } from './kindle'
 import { ScreenService } from './screen'
 import { STATS_SCRIPT, STATS_LIGHT_SCRIPT, parseStatsOutput, fetchDeviceInfo, fetchStorageInfo, fetchThreads, type ParsedStat } from './stats'
 import { FileService } from './files'
-import type { DeviceProfile, DeviceStore, StatsSnapshot, TransferProgress, ScreenFrame, ConnState } from '../shared/types'
+import { LibraryService } from './library'
+import type { DeviceProfile, DeviceStore, StatsSnapshot, TransferProgress, ScreenFrame, ConnState, LibraryBook } from '../shared/types'
 
 const EMPTY_PROFILE: Omit<DeviceProfile, 'id' | 'name'> = {
   host: '',
@@ -84,6 +85,7 @@ let mainWindow: BrowserWindow | null = null
 const ssh = new KindleSSH()
 const screenService = new ScreenService()
 let fileService: FileService | null = null
+let libraryService: LibraryService | null = null
 
 let statsTimer: NodeJS.Timeout | null = null
 let prevCpu: ParsedStat | null = null
@@ -161,6 +163,14 @@ ssh.on('state', (state: ConnState, err: string) => {
   appendLog(`连接状态: ${state}${err ? ` — ${err}` : ''}`)
   if (state === 'connected') {
     fileService = new FileService(ssh, (p: TransferProgress) => send('kd:transfer-progress', p))
+    // 书库缓存按设备 host 分目录（userData/devices/<host>/library-cache）
+    const safeHost = (currentSettings?.host ?? 'device').replace(/[^a-zA-Z0-9.-]/g, '_')
+    libraryService = new LibraryService(
+      ssh,
+      join(app.getPath('userData'), 'devices', safeHost),
+      (p) => send('kd:library-scan-progress', p),
+      (p: TransferProgress) => send('kd:transfer-progress', p)
+    )
     screenService.bind(ssh)
     if (currentSettings?.keepAwake) {
       void ssh.exec(KEEP_AWAKE_ON, 5000).catch(() => {})
@@ -206,12 +216,19 @@ function createWindow(): void {
       const { mkdir } = await import('fs/promises')
       await mkdir(shotDir, { recursive: true })
       await new Promise((r) => setTimeout(r, 6000))
-      const tabs = ['overview', 'procs', 'files', 'term']
+      // 巡游需自行建立连接（应用本身无启动自动连接）：双击设备行触发 connectDevice
+      await mainWindow.webContents.executeJavaScript(
+        `document.querySelectorAll('.device-name')[0]?.dispatchEvent(new MouseEvent('dblclick', {bubbles:true}))`
+      )
+      await new Promise((r) => setTimeout(r, 5000))
+      const tabs = ['overview', 'library', 'procs', 'files', 'term']
       for (let i = 0; i < tabs.length; i++) {
         if (!mainWindow) break
         try {
           await mainWindow.webContents.executeJavaScript(`document.querySelectorAll('.nav-item')[${i}]?.click()`)
-          await new Promise((r) => setTimeout(r, 5000))
+          // 内容管理页：等待扫描完成（冷启动首扫 ~10s，缓存后 <1s）
+          if (tabs[i] === 'library') await new Promise((r) => setTimeout(r, 12000))
+          else await new Promise((r) => setTimeout(r, 5000))
           if (!mainWindow) break
           // 小窗口下截屏验证屏幕镜像自适应缩放
           if (tabs[i] === 'screen') {
@@ -305,6 +322,9 @@ ipcMain.handle('kd:connect', async (_e, profile: DeviceProfile) => {
   await ssh.connectAndRemember(profile)
   return true
 })
+
+// 渲染端 mount 时主动查询当前连接状态（页面重载/晚加载时事件已错过，仅靠事件会永久不同步）
+ipcMain.handle('kd:conn-state', () => ({ state: ssh.state, err: ssh.error }))
 
 ipcMain.handle('kd:disconnect', async () => {
   pendingScreenInterval = 0
@@ -481,6 +501,37 @@ ipcMain.handle('kd:fs-download', async (_e, remotePath: string) => {
   if (canceled || !filePath || !fileService) return false
   await fileService.download(remotePath, filePath)
   return true
+})
+
+// ---------- 内容管理（书库） ----------
+
+ipcMain.handle('kd:library-scan', async () =>
+  libraryService?.scan() ?? { books: [], error: '未连接', durationMs: 0, cached: 0 }
+)
+
+ipcMain.handle('kd:library-get-cover', (_e, id: string) => libraryService?.getCoverDataUrl(id) ?? null)
+
+ipcMain.handle('kd:library-delete', (_e, id: string) => libraryService?.deleteBook(id) ?? '未连接')
+
+ipcMain.handle('kd:library-upload', async (_e, localPaths: string[]) => {
+  if (!libraryService || !localPaths.length) return 0
+  return libraryService.uploadBooks(localPaths)
+})
+
+ipcMain.handle('kd:library-pick-books', async () => {
+  const win = BrowserWindow.getFocusedWindow() ?? mainWindow
+  const { canceled, filePaths } = await dialog.showOpenDialog(win!, {
+    title: '选择要上传的电子书',
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      {
+        name: '电子书',
+        extensions: ['azw', 'azw1', 'azw2', 'azw3', 'azw4', 'mobi', 'prc', 'pdf', 'tpz', 'txt', 'epub']
+      },
+      { name: '所有文件', extensions: ['*'] }
+    ]
+  })
+  return canceled ? [] : filePaths
 })
 
 // ---------- 终端 ----------

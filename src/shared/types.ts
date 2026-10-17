@@ -131,3 +131,39 @@ export interface TransferProgress {
   done: boolean
   error?: string
 }
+
+// ---------- 内容管理（书库） ----------
+
+export interface LibraryBook {
+  /** 远程绝对路径（同时作为唯一 ID） */
+  id: string
+  path: string
+  fileName: string
+  /** 书名：EXTH 503 → MOBI fullName → 文件名 */
+  title: string
+  author: string
+  asin: string
+  publisher?: string
+  publishDate?: string
+  /** 小写扩展名：azw3 / azw / mobi / pdf / txt / epub … */
+  format: string
+  size: number
+  mtimeMs: number
+  hasCover: boolean
+  coverMime?: string
+}
+
+export interface LibraryScanResult {
+  books: LibraryBook[]
+  error?: string
+  durationMs: number
+  /** 本次扫描中有多少本书直接命中本地缓存（未重新读取设备） */
+  cached: number
+}
+
+export interface LibraryScanProgress {
+  phase: 'list' | 'meta'
+  done: number
+  total: number
+  current: string
+}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AppProvider, useConn } from './store'
 import Overview from './pages/Overview'
+import Library from './pages/Library'
 import Processes from './pages/Processes'
 import Files from './pages/Files'
 import Terminal from './pages/Terminal'
@@ -8,7 +9,7 @@ import SettingsModal from './components/SettingsModal'
 import { kd } from './api'
 import type { DeviceProfile } from '../../shared/types'
 
-type Page = 'overview' | 'procs' | 'files' | 'term'
+type Page = 'overview' | 'library' | 'procs' | 'files' | 'term'
 type ThemePref = 'auto' | 'light' | 'dark'
 
 const PROJECT_URL = 'https://github.com/IceThunder/kindledash'
@@ -27,6 +28,15 @@ const NAV: { id: Page; label: string; icon: JSX.Element }[] = [
     icon: (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
         <path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zM0 8a8 8 0 1116 0A8 8 0 010 8zm6.5-.25A.75.75 0 017.25 7h1a.75.75 0 01.75.75v2.75h.25a.75.75 0 010 1.5h-2a.75.75 0 010-1.5h.25v-2h-.25a.75.75 0 01-.75-.75zM8 6a1 1 0 100-2 1 1 0 000 2z" />
+      </svg>
+    )
+  },
+  {
+    id: 'library',
+    label: '内容管理',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M1 2.828c.885-.37 2.154-.769 3.388-.893 1.33-.134 2.458.063 3.112.752v9.746c-.935-.53-2.12-.603-3.213-.493-1.18.12-2.37.461-3.287.811V2.828zm7.5-.141c.654-.689 1.782-.886 3.112-.752 1.234.124 2.503.523 3.388.893v9.923c-.918-.35-2.107-.692-3.287-.81-1.064-.111-2.278-.039-3.213.492V2.687zM8 1.783C7.015.936 5.587.81 4.287.94c-1.514.153-3.042.672-3.994 1.105A.5.5 0 000 2.5v11a.5.5 0 00.707.455c.882-.4 2.303-.881 3.68-1.02 1.409-.142 2.59.087 3.223.877a.5.5 0 00.78 0c.633-.79 1.814-1.019 3.223-.877 1.377.139 2.798.62 3.68 1.02A.5.5 0 0016 13.5v-11a.5.5 0 00-.293-.455c-.952-.433-2.48-.952-3.994-1.105C10.413.809 8.985.936 8 1.783z" />
       </svg>
     )
   },
@@ -94,9 +104,9 @@ function AboutModal({ onClose }: { onClose: () => void }): JSX.Element {
         <h3 style={{ marginBottom: 2 }}>KindleDash</h3>
         <div style={{ color: 'var(--text-dim)', fontSize: 13, marginBottom: 14 }}>v{version || '…'}</div>
         <div style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.8, marginBottom: 16 }}>
-          越狱 Kindle 管理工具 — 屏幕镜像 / 性能监控
+          越狱 Kindle 管理工具 — 书库管理 / 屏幕镜像
           <br />
-          进程线程 / 文件管理 / 远程终端
+          性能监控 / 进程线程 / 文件管理 / 远程终端
           <br />
           Electron + React + TypeScript · MIT
         </div>
@@ -280,6 +290,7 @@ function Shell(): JSX.Element {
       </aside>
       <main className="content">
         {page === 'overview' && <Overview screenInterval={screenInterval} />}
+        {page === 'library' && <Library />}
         {page === 'procs' && <Processes />}
         {page === 'files' && <Files />}
         {page === 'term' && <Terminal />}

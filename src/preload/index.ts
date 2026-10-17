@@ -8,13 +8,17 @@ import type {
   ScreenFrame,
   ThreadInfo,
   FileEntry,
-  TransferProgress
+  TransferProgress,
+  LibraryBook,
+  LibraryScanResult,
+  LibraryScanProgress
 } from '../shared/types'
 
 const api = {
   // 连接（传入完整设备配置）
   connect: (profile: DeviceProfile) => ipcRenderer.invoke('kd:connect', profile),
   disconnect: () => ipcRenderer.invoke('kd:disconnect'),
+  connState: (): Promise<{ state: ConnState; err: string }> => ipcRenderer.invoke('kd:conn-state'),
   onState: (cb: (state: ConnState, err: string) => void) => {
     const l = (_e: unknown, state: ConnState, err: string) => cb(state, err)
     ipcRenderer.on('kd:state', l)
@@ -88,6 +92,18 @@ const api = {
     return () => {
       ipcRenderer.removeListener('kd:transfer-progress', l)
     }
+  },
+
+  // 内容管理（书库）
+  libraryScan: (): Promise<LibraryScanResult> => ipcRenderer.invoke('kd:library-scan'),
+  libraryGetCover: (id: string): Promise<string | null> => ipcRenderer.invoke('kd:library-get-cover', id),
+  libraryDelete: (id: string): Promise<string | null> => ipcRenderer.invoke('kd:library-delete', id),
+  libraryUpload: (localPaths: string[]): Promise<number> => ipcRenderer.invoke('kd:library-upload', localPaths),
+  libraryPickBooks: (): Promise<string[]> => ipcRenderer.invoke('kd:library-pick-books'),
+  onLibraryScanProgress: (cb: (p: LibraryScanProgress) => void) => {
+    const l = (_e: unknown, p: LibraryScanProgress) => cb(p)
+    ipcRenderer.on('kd:library-scan-progress', l)
+    return () => ipcRenderer.removeListener('kd:library-scan-progress', l)
   },
 
   // 终端

@@ -129,6 +129,11 @@ export function AppProvider({ children }: { children: React.ReactNode }): JSX.El
     void kd.devicesList().then((store) => {
       applyStore(store)
     })
+    // 页面重载/晚加载时 kd:state 事件可能已错过，主动拉一次当前状态
+    void kd.connState().then(({ state, err }) => {
+      setState(state)
+      setErr(err || '')
+    })
     return () => {
       off()
       offStats()
