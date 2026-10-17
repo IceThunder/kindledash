@@ -11,7 +11,10 @@ import type {
   TransferProgress,
   LibraryBook,
   LibraryScanResult,
-  LibraryScanProgress
+  LibraryScanProgress,
+  CleanupScanResult,
+  CleanupDeleteResult,
+  CleanupProgress
 } from '../shared/types'
 
 const api = {
@@ -104,6 +107,16 @@ const api = {
     const l = (_e: unknown, p: LibraryScanProgress) => cb(p)
     ipcRenderer.on('kd:library-scan-progress', l)
     return () => ipcRenderer.removeListener('kd:library-scan-progress', l)
+  },
+
+  // 垃圾清理（删除仅处理用户勾选并确认过的清单）
+  cleanupScan: (): Promise<CleanupScanResult> => ipcRenderer.invoke('kd:cleanup-scan'),
+  cleanupDelete: (paths: string[]): Promise<CleanupDeleteResult> =>
+    ipcRenderer.invoke('kd:cleanup-delete', paths),
+  onCleanupProgress: (cb: (p: CleanupProgress) => void) => {
+    const l = (_e: unknown, p: CleanupProgress) => cb(p)
+    ipcRenderer.on('kd:cleanup-progress', l)
+    return () => ipcRenderer.removeListener('kd:cleanup-progress', l)
   },
 
   // 终端

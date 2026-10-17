@@ -167,3 +167,48 @@ export interface LibraryScanProgress {
   total: number
   current: string
 }
+
+// ---------- 垃圾清理 ----------
+
+/** 垃圾类别：孤儿伴生目录 / 系统残留文件 / 临时目录 / 剪贴汇总 / 空目录 */
+export type JunkCategory = 'orphan-sidecar' | 'sys-junk' | 'temp' | 'clippings' | 'empty-dir'
+
+export interface JunkItem {
+  /** 远程绝对路径（同时作为唯一 ID） */
+  id: string
+  path: string
+  name: string
+  category: JunkCategory
+  isDir: boolean
+  /** true 表示只清空目录内容、保留目录本身（system/tmp、system/temp） */
+  dirContents?: boolean
+  /** 目录为递归累计字节数 */
+  size: number
+  /** 目录内文件数（普通文件为 1） */
+  fileCount: number
+  mtimeMs: number
+  /** 判定为垃圾的依据，展示给用户 */
+  reason: string
+}
+
+export interface CleanupScanResult {
+  items: JunkItem[]
+  error?: string
+  durationMs: number
+  scannedDirs: number
+}
+
+export interface CleanupDeleteResult {
+  ok: number
+  failed: number
+  /** 删除时设备状态已变化、复核不通过的条目数 */
+  skipped: number
+  freedBytes: number
+  errors: string[]
+}
+
+export interface CleanupProgress {
+  current: string
+  found: number
+  scannedDirs: number
+}

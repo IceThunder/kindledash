@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { kd } from '../api'
 import { useConn, useStats, fmtKB, fmtUptime } from '../store'
-import { ConfirmDialog, StatCard } from '../components/ui'
+import { ConfirmDialog, Ring } from '../components/ui'
 import ScreenMirror from '../components/ScreenMirror'
+import Cleanup from '../components/Cleanup'
 import type { DeviceInfo } from '../../../shared/types'
 
 /** 序列号脱敏：首 5 位 + … + 尾 4 位 */
@@ -82,18 +83,48 @@ export default function Overview({ screenInterval }: { screenInterval: number })
           <ScreenMirror interval={screenInterval} />
         </div>
         <div className="overview-summary">
-          <div className="overview-stat-grid">
-            <StatCard
-              label="电池"
-              value={battery?.capacity != null ? `${battery.capacity}%` : '—'}
-              sub={battery?.voltageMV != null ? `${battery.voltageMV} mV · ${battery.temperatureC ?? '?'}°C` : undefined}
-              color={battery?.capacity != null && battery.capacity < 20 ? 'var(--red)' : 'var(--green)'}
-            />
-            <StatCard
-              label="运行时间"
-              value={stats ? fmtUptime(stats.uptime) : '…'}
-              sub={stats ? `负载 ${stats.load.map((l) => l.toFixed(2)).join(' / ')}` : undefined}
-            />
+          <div className="card overview-stat-row">
+            {(() => {
+              const pct = battery?.capacity ?? null
+              const color =
+                pct == null ? 'var(--text-faint)' : pct > 50 ? 'var(--green)' : pct > 20 ? 'var(--yellow)' : 'var(--red)'
+              const sub =
+                battery?.voltageMV != null
+                  ? `${(battery.voltageMV / 1000).toFixed(2)} V${
+                      battery.currentMA != null ? ` · ${battery.currentMA > 0 ? '+' : ''}${battery.currentMA} mA` : ''
+                    }`
+                  : '电池'
+              return <Ring percent={pct ?? 0} size={92} color={color} label={sub} value={pct != null ? `${pct}%` : '—'} />
+            })()}
+            {(() => {
+              const t = battery?.temperatureC ?? null
+              const color = t == null ? 'var(--text-faint)' : t < 40 ? 'var(--green)' : t < 50 ? 'var(--yellow)' : 'var(--red)'
+              return (
+                <Ring
+                  percent={t == null ? 0 : Math.min(100, (t / 60) * 100)}
+                  size={92}
+                  color={color}
+                  label="电池温度"
+                  value={t != null ? `${t}°C` : '—'}
+                />
+              )
+            })()}
+            <div className="stat-uptime">
+              <div className="stat-uptime-label">运行时间</div>
+              <div className="stat-uptime-value">{stats ? fmtUptime(stats.uptime) : '…'}</div>
+              {stats && (
+                <div className="stat-uptime-sub">
+                  开机于{' '}
+                  {new Date(Date.now() - stats.uptime * 1000).toLocaleString('zh-CN', {
+                    month: 'numeric',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false
+                  })}
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="card overview-hardware">
@@ -174,6 +205,10 @@ export default function Overview({ screenInterval }: { screenInterval: number })
           </tbody>
         </table>}
       </div>
+
+      <div style={{ marginBottom: 14 }} />
+
+      <Cleanup connected={live} />
 
       {confirmReboot && (
         <ConfirmDialog

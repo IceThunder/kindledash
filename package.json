@@ -1,7 +1,7 @@
 {
   "name": "kindledash",
   "version": "0.1.0",
-  "description": "Kindle Paperwhite 管理器 — 书库管理 / 屏幕镜像 / 性能监控 / 进程线程 / 文件管理 / 远程终端",
+  "description": "Kindle Paperwhite 管理器 — 书库管理 / 屏幕镜像 / 性能监控 / 进程线程 / 文件管理 / 远程终端 / 垃圾清理",
   "main": "out/main/index.js",
   "author": "IceThunder",
   "license": "MIT",

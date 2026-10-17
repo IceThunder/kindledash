@@ -8,6 +8,7 @@ import { ScreenService } from './screen'
 import { STATS_SCRIPT, STATS_LIGHT_SCRIPT, parseStatsOutput, fetchDeviceInfo, fetchStorageInfo, fetchThreads, type ParsedStat } from './stats'
 import { FileService } from './files'
 import { LibraryService } from './library'
+import { CleanupService } from './cleanup'
 import type { DeviceProfile, DeviceStore, StatsSnapshot, TransferProgress, ScreenFrame, ConnState, LibraryBook } from '../shared/types'
 
 const EMPTY_PROFILE: Omit<DeviceProfile, 'id' | 'name'> = {
@@ -86,6 +87,7 @@ const ssh = new KindleSSH()
 const screenService = new ScreenService()
 let fileService: FileService | null = null
 let libraryService: LibraryService | null = null
+let cleanupService: CleanupService | null = null
 
 let statsTimer: NodeJS.Timeout | null = null
 let prevCpu: ParsedStat | null = null
@@ -171,6 +173,7 @@ ssh.on('state', (state: ConnState, err: string) => {
       (p) => send('kd:library-scan-progress', p),
       (p: TransferProgress) => send('kd:transfer-progress', p)
     )
+    cleanupService = new CleanupService(ssh, (p) => send('kd:cleanup-progress', p))
     screenService.bind(ssh)
     if (currentSettings?.keepAwake) {
       void ssh.exec(KEEP_AWAKE_ON, 5000).catch(() => {})
@@ -228,7 +231,33 @@ function createWindow(): void {
           await mainWindow.webContents.executeJavaScript(`document.querySelectorAll('.nav-item')[${i}]?.click()`)
           // 内容管理页：等待扫描完成（冷启动首扫 ~10s，缓存后 <1s）
           if (tabs[i] === 'library') await new Promise((r) => setTimeout(r, 12000))
-          else await new Promise((r) => setTimeout(r, 5000))
+          // 总览页：KD_TOUR_CLEANUP=1 时点击「扫描垃圾」等待结果，验证垃圾清理卡片；
+          // 只截屏验证确认弹窗后点「取消」——真实删除必须由用户手动确认，巡游不做删除
+          else if (tabs[i] === 'overview' && process.env.KD_TOUR_CLEANUP) {
+            try {
+              const cleanupWait = Number(process.env.KD_TOUR_CLEANUP_WAIT) || 45000
+              await mainWindow.webContents.executeJavaScript(
+                `[...document.querySelectorAll('button')].find(b => (b.textContent||'').includes('扫描垃圾'))?.click()`
+              )
+              await new Promise((r) => setTimeout(r, cleanupWait))
+              const imgCleanup = await mainWindow.webContents.capturePage()
+              await writeFile(join(shotDir, 'page-overview-cleanup.png'), imgCleanup.toPNG())
+              console.log('[tour] captured overview-cleanup')
+              // 触发删除确认弹窗并截图后取消
+              await mainWindow.webContents.executeJavaScript(
+                `[...document.querySelectorAll('button')].find(b => (b.textContent||'').includes('删除所选'))?.click()`
+              )
+              await new Promise((r) => setTimeout(r, 900))
+              const imgConfirm = await mainWindow.webContents.capturePage()
+              await writeFile(join(shotDir, 'page-overview-cleanup-confirm.png'), imgConfirm.toPNG())
+              console.log('[tour] captured overview-cleanup-confirm')
+              await mainWindow.webContents.executeJavaScript(
+                `[...document.querySelectorAll('.modal .btn')].find(b => b.textContent==='取消')?.click()`
+              )
+            } catch (e) {
+              console.log('[tour] cleanup capture failed:', (e as Error).message)
+            }
+          } else await new Promise((r) => setTimeout(r, 5000))
           if (!mainWindow) break
           // 小窗口下截屏验证屏幕镜像自适应缩放
           if (tabs[i] === 'screen') {
@@ -533,6 +562,17 @@ ipcMain.handle('kd:library-pick-books', async () => {
   })
   return canceled ? [] : filePaths
 })
+
+// ---------- 垃圾清理 ----------
+// 只扫描与按用户确认的清单删除；删除前主进程会逐条复核垃圾判定（见 cleanup.ts）
+
+ipcMain.handle('kd:cleanup-scan', async () =>
+  cleanupService?.scan() ?? { items: [], error: '未连接', durationMs: 0, scannedDirs: 0 }
+)
+
+ipcMain.handle('kd:cleanup-delete', (_e, paths: string[]) =>
+  cleanupService?.delete(paths ?? []) ?? { ok: 0, failed: 0, skipped: 0, freedBytes: 0, errors: ['未连接'] }
+)
 
 // ---------- 终端 ----------
 
