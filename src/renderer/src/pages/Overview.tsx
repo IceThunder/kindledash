@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { kd } from '../api'
 import { useConn, useStats, fmtKB, fmtUptime } from '../store'
+import { useI18n, localeTag } from '../i18n'
 import { ConfirmDialog, Ring } from '../components/ui'
 import ScreenMirror from '../components/ScreenMirror'
 import Cleanup from '../components/Cleanup'
@@ -12,9 +13,10 @@ function maskSerial(s: string): string {
   return `${s.slice(0, 5)}…${s.slice(-4)}`
 }
 
-export default function Overview({ screenInterval }: { screenInterval: number }): JSX.Element {
+export default function Overview(): JSX.Element {
   const { state } = useConn()
   const { stats } = useStats()
+  const { t } = useI18n()
   const [info, setInfo] = useState<DeviceInfo | null>(null)
   const [err, setErr] = useState('')
   const [storage, setStorage] = useState<import('../../../shared/types').StorageInfo[] | null>(null)
@@ -41,7 +43,7 @@ export default function Overview({ screenInterval }: { screenInterval: number })
   }, [state])
 
   if (state !== 'connected' && !stats) {
-    return <div className="empty">设备未连接 — 请点击左下角「连接设置」配置 SSH 并连接</div>
+    return <div className="empty">{t('overview.notConnectedHint')}</div>
   }
   const live = state === 'connected'
 
@@ -61,26 +63,28 @@ export default function Overview({ screenInterval }: { screenInterval: number })
   return (
     <div>
       <div className="page-title">
-        总览
+        {t('nav.overview')}
         <button className="btn small" onClick={() => void kd.getDeviceInfo().then(setInfo)}>
-          刷新
+          {t('common.refresh')}
         </button>
         <span style={{ flex: 1 }} />
         <button className="btn danger small" onClick={() => setConfirmReboot(true)}>
-          重启设备
+          {t('overview.rebootBtn')}
         </button>
       </div>
 
-      {err && <div className="card" style={{ borderColor: 'var(--red)', marginBottom: 14 }}>读取设备信息失败：{err}</div>}
+      {err && <div className="card" style={{ borderColor: 'var(--red)', marginBottom: 14 }}>{t('overview.readFailed', { err })}</div>}
       {!live && stats && (
         <div className="card" style={{ borderColor: 'var(--yellow)', marginBottom: 14, padding: '8px 16px', fontSize: 13 }}>
-          连接已断开 · 显示最后的数据（{new Date(stats.ts).toLocaleTimeString('zh-CN', { hour12: false })}），重连后自动恢复
+          {t('overview.staleData', {
+            time: new Date(stats.ts).toLocaleTimeString(localeTag(), { hour12: false })
+          })}
         </div>
       )}
 
       <div className="overview-hero">
         <div className="overview-screen">
-          <ScreenMirror interval={screenInterval} />
+          <ScreenMirror />
         </div>
         <div className="overview-summary">
           <div className="card overview-stat-row">
@@ -93,34 +97,35 @@ export default function Overview({ screenInterval }: { screenInterval: number })
                   ? `${(battery.voltageMV / 1000).toFixed(2)} V${
                       battery.currentMA != null ? ` · ${battery.currentMA > 0 ? '+' : ''}${battery.currentMA} mA` : ''
                     }`
-                  : '电池'
+                  : t('overview.battery')
               return <Ring percent={pct ?? 0} size={92} color={color} label={sub} value={pct != null ? `${pct}%` : '—'} />
             })()}
             {(() => {
-              const t = battery?.temperatureC ?? null
-              const color = t == null ? 'var(--text-faint)' : t < 40 ? 'var(--green)' : t < 50 ? 'var(--yellow)' : 'var(--red)'
+              const temp = battery?.temperatureC ?? null
+              const color = temp == null ? 'var(--text-faint)' : temp < 40 ? 'var(--green)' : temp < 50 ? 'var(--yellow)' : 'var(--red)'
               return (
                 <Ring
-                  percent={t == null ? 0 : Math.min(100, (t / 60) * 100)}
+                  percent={temp == null ? 0 : Math.min(100, (temp / 60) * 100)}
                   size={92}
                   color={color}
-                  label="电池温度"
-                  value={t != null ? `${t}°C` : '—'}
+                  label={t('overview.batteryTemp')}
+                  value={temp != null ? `${temp}°C` : '—'}
                 />
               )
             })()}
             <div className="stat-uptime">
-              <div className="stat-uptime-label">运行时间</div>
+              <div className="stat-uptime-label">{t('overview.uptime')}</div>
               <div className="stat-uptime-value">{stats ? fmtUptime(stats.uptime) : '…'}</div>
               {stats && (
                 <div className="stat-uptime-sub">
-                  开机于{' '}
-                  {new Date(Date.now() - stats.uptime * 1000).toLocaleString('zh-CN', {
-                    month: 'numeric',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    hour12: false
+                  {t('overview.bootAt', {
+                    time: new Date(Date.now() - stats.uptime * 1000).toLocaleString(localeTag(), {
+                      month: 'numeric',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      hour12: false
+                    })
                   })}
                 </div>
               )}
@@ -128,33 +133,33 @@ export default function Overview({ screenInterval }: { screenInterval: number })
           </div>
 
           <div className="card overview-hardware">
-            <div className="card-title">硬件信息</div>
+            <div className="card-title">{t('overview.hardware')}</div>
             {info ? (
               <dl className="kv">
-                <dt>设备名称</dt>
+                <dt>{t('overview.deviceName')}</dt>
                 <dd>{info.deviceName ?? info.model}</dd>
-                <dt>处理器</dt>
-                <dd>{info.cpuModel} · {info.cpuCores} 核</dd>
-                <dt>内存</dt>
+                <dt>{t('overview.cpu')}</dt>
+                <dd>{info.cpuModel} · {t('overview.cores', { n: info.cpuCores })}</dd>
+                <dt>{t('overview.memory')}</dt>
                 <dd>{info.ramTotalKB ? fmtKB(info.ramTotalKB) : '—'}</dd>
-                <dt>序列号</dt>
+                <dt>{t('overview.serial')}</dt>
                 <dd style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span>{showSerial ? info.serial || '—' : maskSerial(info.serial) || '—'}</span>
                   {info.serial && info.serial.length > 10 && (
                     <button className="btn small" onClick={() => setShowSerial((v) => !v)}>
-                      {showSerial ? '隐藏' : '显示完整序列号'}
+                      {showSerial ? t('overview.hideSerial') : t('overview.showSerial')}
                     </button>
                   )}
                 </dd>
-                <dt>主板 ID</dt>
+                <dt>{t('overview.boardId')}</dt>
                 <dd>{info.boardId || '—'}</dd>
-                <dt>硬件平台</dt>
+                <dt>{t('overview.platform')}</dt>
                 <dd>{info.hardware || '—'}</dd>
-                <dt>内核版本</dt>
+                <dt>{t('overview.kernel')}</dt>
                 <dd>{info.kernel}</dd>
               </dl>
             ) : (
-              <div className="empty" style={{ padding: 36 }}>读取中…</div>
+              <div className="empty" style={{ padding: 36 }}>{t('common.loading')}</div>
             )}
           </div>
         </div>
@@ -162,20 +167,20 @@ export default function Overview({ screenInterval }: { screenInterval: number })
 
       <div className="card">
         <div className="card-title" style={{ display: 'flex', alignItems: 'center', marginBottom: storageOpen ? 10 : 0 }}>
-          <span>存储分区</span>
+          <span>{t('overview.storage')}</span>
           <span style={{ flex: 1 }} />
           <button className="btn small" onClick={toggleStorage} disabled={storageLoading}>
-            {storageLoading ? '读取中…' : storageOpen ? '收起' : '查看分区'}
+            {storageLoading ? t('common.loading') : storageOpen ? t('overview.collapse') : t('overview.viewParts')}
           </button>
         </div>
         {storageOpen && <table className="tbl">
           <thead>
             <tr>
-              <th>挂载点</th>
-              <th>总容量</th>
-              <th>已用</th>
-              <th>可用</th>
-              <th style={{ width: '40%' }}>使用率</th>
+              <th>{t('overview.mount')}</th>
+              <th>{t('overview.total')}</th>
+              <th>{t('overview.used')}</th>
+              <th>{t('overview.avail')}</th>
+              <th style={{ width: '40%' }}>{t('overview.usage')}</th>
             </tr>
           </thead>
           <tbody>
@@ -198,7 +203,7 @@ export default function Overview({ screenInterval }: { screenInterval: number })
             {!storage && (
               <tr>
                 <td colSpan={5} className="empty">
-                  等待数据…
+                  {t('common.waitingData')}
                 </td>
               </tr>
             )}
@@ -212,15 +217,15 @@ export default function Overview({ screenInterval }: { screenInterval: number })
 
       {confirmReboot && (
         <ConfirmDialog
-          title="重启 Kindle"
+          title={t('overview.rebootTitle')}
           body={
             <>
-              确定要重启设备吗？
+              {t('overview.rebootBody1')}
               <br />
-              重启后 SSH 服务可能需要一两分钟才能恢复，应用会自动重连。
+              {t('overview.rebootBody2')}
             </>
           }
-          confirmText="重启"
+          confirmText={t('overview.rebootConfirm')}
           danger
           onConfirm={() => {
             setConfirmReboot(false)

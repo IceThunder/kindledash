@@ -1,16 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { kd } from '../api'
 import { useConn } from '../store'
+import { useI18n, localeTag } from '../i18n'
 import { ConfirmDialog } from '../components/ui'
 import type { FileEntry, TransferProgress } from '../../../shared/types'
-
-const QUICK = [
-  { label: '用户存储 /mnt/us', path: '/mnt/us' },
-  { label: '系统 /', path: '/' },
-  { label: '/var/local', path: '/var/local' },
-  { label: '屏幕保护', path: '/usr/share/blanket/screensaver' },
-  { label: '/etc', path: '/etc' }
-]
 
 function fmtSize(n: number): string {
   if (n < 1024) return `${n} B`
@@ -30,6 +23,7 @@ function modeString(mode: number): string {
 
 export default function Files(): JSX.Element {
   const { state } = useConn()
+  const { t } = useI18n()
   const [path, setPath] = useState('/mnt/us')
   const [entries, setEntries] = useState<FileEntry[]>([])
   const [error, setError] = useState('')
@@ -43,6 +37,14 @@ export default function Files(): JSX.Element {
   const [preview, setPreview] = useState<{ name: string; text: string } | null>(null)
   const [transfers, setTransfers] = useState<TransferProgress[]>([])
   const history = useRef<string[]>([])
+
+  const quick = [
+    { label: t('files.quickUser'), path: '/mnt/us' },
+    { label: t('files.quickRoot'), path: '/' },
+    { label: '/var/local', path: '/var/local' },
+    { label: t('files.quickScreensaver'), path: '/usr/share/blanket/screensaver' },
+    { label: '/etc', path: '/etc' }
+  ]
 
   const load = useCallback(async (p: string, pushHistory = true) => {
     setLoading(true)
@@ -64,7 +66,7 @@ export default function Files(): JSX.Element {
   useEffect(() => {
     const off = kd.onTransferProgress((p) => {
       setTransfers((list) => {
-        const i = list.findIndex((t) => t.id === p.id)
+        const i = list.findIndex((tt) => tt.id === p.id)
         if (i >= 0) {
           const copy = [...list]
           copy[i] = p
@@ -73,7 +75,7 @@ export default function Files(): JSX.Element {
         return [...list, p]
       })
       if (p.done) {
-        setTimeout(() => setTransfers((list) => list.filter((t) => t.id !== p.id)), 2500)
+        setTimeout(() => setTransfers((list) => list.filter((tt) => tt.id !== p.id)), 2500)
         if (!p.error) void load(path, false)
       }
     })
@@ -97,7 +99,7 @@ export default function Files(): JSX.Element {
     const e = confirmDelete
     setConfirmDelete(null)
     const err = await kd.fsDelete(`${path.replace(/\/$/, '')}/${e.name}`, e.isDir)
-    if (err) setError(`删除失败：${err}`)
+    if (err) setError(t('common.deleteFailed', { err }))
     void load(path, false)
   }
 
@@ -109,7 +111,7 @@ export default function Files(): JSX.Element {
       `${path.replace(/\/$/, '')}/${e.name}`,
       `${path.replace(/\/$/, '')}/${renameValue.trim()}`
     )
-    if (err) setError(`重命名失败：${err}`)
+    if (err) setError(t('files.renameFailed', { err }))
     void load(path, false)
   }
 
@@ -117,13 +119,13 @@ export default function Files(): JSX.Element {
     if (!createValue.trim()) return
     setCreating(false)
     const err = await kd.fsMkdir(`${path.replace(/\/$/, '')}/${createValue.trim()}`)
-    if (err) setError(`创建失败：${err}`)
+    if (err) setError(t('files.createFailed', { err }))
     void load(path, false)
   }
 
   const previewText = async (e: FileEntry) => {
     const r = await kd.fsReadText(`${path.replace(/\/$/, '')}/${e.name}`)
-    if (r.error) setError(`读取失败：${r.error}`)
+    if (r.error) setError(t('files.readFailed', { err: r.error }))
     else setPreview({ name: e.name, text: r.text })
   }
 
@@ -134,22 +136,22 @@ export default function Files(): JSX.Element {
   const parts = path.split('/').filter(Boolean)
 
   if (state !== 'connected') {
-    return <div className="empty">设备未连接</div>
+    return <div className="empty">{t('common.deviceNotConnected')}</div>
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div className="page-title" style={{ marginBottom: 10 }}>
-        文件管理
+        {t('nav.files')}
         <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--text-dim)' }}>SFTP</span>
       </div>
 
       <div className="file-toolbar">
         <button className="btn small" onClick={parent} disabled={path === '/'}>
-          ↑ 上级
+          ↑ {t('files.parent')}
         </button>
         <button className="btn small" onClick={() => void load(path, false)}>
-          ⟳ 刷新
+          ⟳ {t('common.refresh')}
         </button>
         <div className="breadcrumb" style={{ flex: 1 }}>
           <a onClick={() => void load('/')}>/</a>
@@ -160,7 +162,7 @@ export default function Files(): JSX.Element {
             </span>
           ))}
         </div>
-        {QUICK.map((q) => (
+        {quick.map((q) => (
           <span key={q.path} className="quick-link" onClick={() => void load(q.path)}>
             {q.label}
           </span>
@@ -169,17 +171,17 @@ export default function Files(): JSX.Element {
 
       <div className="file-toolbar">
         <button className="btn small primary" onClick={() => void kd.fsUpload(path)}>
-          ⬆ 上传文件
+          ⬆ {t('files.upload')}
         </button>
         <button
           className="btn small"
           disabled={!selected}
           onClick={() => selected && void kd.fsDownload(`${path.replace(/\/$/, '')}/${selected}`)}
         >
-          ⬇ 下载
+          ⬇ {t('files.download')}
         </button>
         <button className="btn small" onClick={() => setCreating(true)}>
-          ＋ 新建文件夹
+          ＋ {t('files.newFolder')}
         </button>
         <button className="btn small" disabled={!selected} onClick={() => {
           const e = entries.find((x) => x.name === selected)
@@ -188,7 +190,7 @@ export default function Files(): JSX.Element {
             setRenameValue(e.name)
           }
         }}>
-          ✎ 重命名
+          ✎ {t('files.rename')}
         </button>
         <button
           className="btn small danger"
@@ -198,11 +200,11 @@ export default function Files(): JSX.Element {
             if (e) setConfirmDelete(e)
           }}
         >
-          🗑 删除
+          🗑 {t('common.del')}
         </button>
         {selected && isText(entries.find((x) => x.name === selected)!) && (
           <button className="btn small" onClick={() => void previewText(entries.find((x) => x.name === selected)!)}>
-            👁 预览
+            👁 {t('files.preview')}
           </button>
         )}
       </div>
@@ -217,17 +219,17 @@ export default function Files(): JSX.Element {
         <table className="tbl">
           <thead>
             <tr>
-              <th>名称</th>
-              <th>大小</th>
-              <th>权限</th>
-              <th>修改时间</th>
+              <th>{t('files.colName')}</th>
+              <th>{t('files.colSize')}</th>
+              <th>{t('files.colPerms')}</th>
+              <th>{t('files.colMtime')}</th>
             </tr>
           </thead>
           <tbody>
             {loading && (
               <tr>
                 <td colSpan={4} className="empty">
-                  读取目录…
+                  {t('files.readingDir')}
                 </td>
               </tr>
             )}
@@ -249,14 +251,14 @@ export default function Files(): JSX.Element {
                     {modeString(e.mode)}
                   </td>
                   <td style={{ color: 'var(--text-dim)' }}>
-                    {e.mtimeMs ? new Date(e.mtimeMs).toLocaleString('zh-CN', { hour12: false }) : '—'}
+                    {e.mtimeMs ? new Date(e.mtimeMs).toLocaleString(localeTag(), { hour12: false }) : '—'}
                   </td>
                 </tr>
               ))}
             {!loading && !entries.length && !error && (
               <tr>
                 <td colSpan={4} className="empty">
-                  空目录（双击文件夹进入）
+                  {t('files.emptyDir')}
                 </td>
               </tr>
             )}
@@ -266,21 +268,21 @@ export default function Files(): JSX.Element {
 
       {/* 传输浮窗 */}
       <div className="transfers">
-        {transfers.map((t) => (
-          <div className="transfer-item" key={t.id}>
+        {transfers.map((tt) => (
+          <div className="transfer-item" key={tt.id}>
             <div className="name">
-              <span title={t.name}>
-                {t.direction === 'upload' ? '↑' : '↓'} {t.name}
+              <span title={tt.name}>
+                {tt.direction === 'upload' ? '↑' : '↓'} {tt.name}
               </span>
-              <span style={{ color: t.error ? 'var(--red)' : 'var(--text-dim)', flexShrink: 0 }}>
-                {t.error ? '失败' : t.done ? '完成' : t.total ? `${Math.round((t.bytes / t.total) * 100)}%` : ''}
+              <span style={{ color: tt.error ? 'var(--red)' : 'var(--text-dim)', flexShrink: 0 }}>
+                {tt.error ? t('common.failed') : tt.done ? t('common.done') : tt.total ? `${Math.round((tt.bytes / tt.total) * 100)}%` : ''}
               </span>
             </div>
             <div className="progress-bar">
               <div
                 style={{
-                  width: `${t.total ? (t.bytes / t.total) * 100 : 100}%`,
-                  background: t.error ? 'var(--red)' : undefined
+                  width: `${tt.total ? (tt.bytes / tt.total) * 100 : 100}%`,
+                  background: tt.error ? 'var(--red)' : undefined
                 }}
               />
             </div>
@@ -290,19 +292,19 @@ export default function Files(): JSX.Element {
 
       {confirmDelete && (
         <ConfirmDialog
-          title={`删除 ${confirmDelete.isDir ? '文件夹' : '文件'}`}
+          title={confirmDelete.isDir ? t('files.deleteFolder') : t('files.deleteFile')}
           body={
             <>
-              确定删除 <b>{confirmDelete.name}</b> 吗？
+              {t('files.deleteBodyA')} <b>{confirmDelete.name}</b> {t('files.deleteBodyB')}
               {confirmDelete.isDir && (
                 <>
                   <br />
-                  文件夹内的全部内容都会被递归删除，不可恢复。
+                  {t('files.deleteDirWarn')}
                 </>
               )}
             </>
           }
-          confirmText="删除"
+          confirmText={t('common.del')}
           danger
           onConfirm={() => void doDelete()}
           onCancel={() => setConfirmDelete(null)}
@@ -312,7 +314,7 @@ export default function Files(): JSX.Element {
       {renaming && (
         <div className="modal-mask" onClick={(e) => e.target === e.currentTarget && setRenaming(null)}>
           <div className="modal" style={{ width: 380 }}>
-            <h3>重命名</h3>
+            <h3>{t('files.rename')}</h3>
             <input
               className="input"
               value={renameValue}
@@ -322,10 +324,10 @@ export default function Files(): JSX.Element {
             />
             <div className="form-actions">
               <button className="btn" onClick={() => setRenaming(null)}>
-                取消
+                {t('common.cancel')}
               </button>
               <button className="btn primary" onClick={() => void doRename()}>
-                确定
+                {t('common.confirm')}
               </button>
             </div>
           </div>
@@ -335,21 +337,21 @@ export default function Files(): JSX.Element {
       {creating && (
         <div className="modal-mask" onClick={(e) => e.target === e.currentTarget && setCreating(false)}>
           <div className="modal" style={{ width: 380 }}>
-            <h3>新建文件夹</h3>
+            <h3>{t('files.newFolder')}</h3>
             <input
               className="input"
               value={createValue}
               autoFocus
-              placeholder="文件夹名称"
+              placeholder={t('files.newFolderPlaceholder')}
               onChange={(e) => setCreateValue(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && void doCreate()}
             />
             <div className="form-actions">
               <button className="btn" onClick={() => setCreating(false)}>
-                取消
+                {t('common.cancel')}
               </button>
               <button className="btn primary" onClick={() => void doCreate()}>
-                创建
+                {t('files.create')}
               </button>
             </div>
           </div>
@@ -375,11 +377,11 @@ export default function Files(): JSX.Element {
                 wordBreak: 'break-all'
               }}
             >
-              {preview.text || '(空文件或二进制)'}
+              {preview.text || t('files.emptyFile')}
             </pre>
             <div className="form-actions">
               <button className="btn" onClick={() => setPreview(null)}>
-                关闭
+                {t('common.close')}
               </button>
             </div>
           </div>

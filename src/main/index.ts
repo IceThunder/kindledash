@@ -9,6 +9,9 @@ import { STATS_SCRIPT, STATS_LIGHT_SCRIPT, parseStatsOutput, fetchDeviceInfo, fe
 import { FileService } from './files'
 import { LibraryService } from './library'
 import { CleanupService } from './cleanup'
+import { loadLanguage, saveLanguage } from './settings'
+import { setMainLang, tMain } from './i18n'
+import { isLang, type Lang } from '../shared/i18n'
 import type { DeviceProfile, DeviceStore, StatsSnapshot, TransferProgress, ScreenFrame, ConnState, LibraryBook } from '../shared/types'
 
 const EMPTY_PROFILE: Omit<DeviceProfile, 'id' | 'name'> = {
@@ -93,6 +96,8 @@ let statsTimer: NodeJS.Timeout | null = null
 let prevCpu: ParsedStat | null = null
 let prevProcs: Map<number, number> | null = null
 let pendingScreenInterval = 0
+
+let appLang: Lang = 'zh'
 
 // 终端通道
 let termStream: import('ssh2').ClientChannel | null = null
@@ -237,7 +242,7 @@ function createWindow(): void {
             try {
               const cleanupWait = Number(process.env.KD_TOUR_CLEANUP_WAIT) || 45000
               await mainWindow.webContents.executeJavaScript(
-                `[...document.querySelectorAll('button')].find(b => (b.textContent||'').includes('扫描垃圾'))?.click()`
+                `document.querySelector('.cleanup-scan-btn')?.click()`
               )
               await new Promise((r) => setTimeout(r, cleanupWait))
               const imgCleanup = await mainWindow.webContents.capturePage()
@@ -245,14 +250,14 @@ function createWindow(): void {
               console.log('[tour] captured overview-cleanup')
               // 触发删除确认弹窗并截图后取消
               await mainWindow.webContents.executeJavaScript(
-                `[...document.querySelectorAll('button')].find(b => (b.textContent||'').includes('删除所选'))?.click()`
+                `document.querySelector('.cleanup-toolbar .btn.danger')?.click()`
               )
               await new Promise((r) => setTimeout(r, 900))
               const imgConfirm = await mainWindow.webContents.capturePage()
               await writeFile(join(shotDir, 'page-overview-cleanup-confirm.png'), imgConfirm.toPNG())
               console.log('[tour] captured overview-cleanup-confirm')
               await mainWindow.webContents.executeJavaScript(
-                `[...document.querySelectorAll('.modal .btn')].find(b => b.textContent==='取消')?.click()`
+                `document.querySelector('.modal .form-actions .btn')?.click()`
               )
             } catch (e) {
               console.log('[tour] cleanup capture failed:', (e as Error).message)
@@ -274,7 +279,7 @@ function createWindow(): void {
           if (tabs[i] === 'term') {
             await ssh.exec('touch "/tmp/中文测试文件.txt"').catch(() => {})
             await mainWindow.webContents.executeJavaScript(
-              `[...document.querySelectorAll('button')].find(b => (b.textContent||'').includes('打开终端'))?.click()`
+              `document.querySelector('.term-page .btn.primary')?.click()`
             )
             await new Promise((r) => setTimeout(r, 3000))
             termStream?.write('ls /tmp\r')
@@ -402,11 +407,11 @@ ipcMain.handle('kd:device-delete', async (_e, id: string) => {
 ipcMain.handle('kd:pick-key-file', async () => {
   const win = BrowserWindow.getFocusedWindow() ?? mainWindow
   const { canceled, filePaths } = await dialog.showOpenDialog(win!, {
-    title: '选择 SSH 私钥文件',
+    title: tMain('main.pickKeyTitle'),
     properties: ['openFile'],
     filters: [
-      { name: '私钥文件', extensions: ['pem', 'key', 'id_rsa', 'id_ed25519', 'openssh'] },
-      { name: '所有文件', extensions: ['*'] }
+      { name: tMain('main.keyFiles'), extensions: ['pem', 'key', 'id_rsa', 'id_ed25519', 'openssh'] },
+      { name: tMain('main.allFiles'), extensions: ['*'] }
     ]
   })
   return canceled || !filePaths.length ? null : filePaths[0]
@@ -418,6 +423,17 @@ ipcMain.handle('kd:open-external', (_e, url: string) => {
 })
 
 ipcMain.handle('kd:app-version', () => app.getVersion())
+
+// 语言：渲染端启动时读取（主进程已按 settings.json / 系统语言定好初值），
+// 用户切换时写回 settings.json，并同步更新主进程文案语言
+ipcMain.handle('kd:get-language', () => appLang)
+ipcMain.handle('kd:set-language', async (_e, lang: Lang) => {
+  if (!isLang(lang)) return false
+  appLang = lang
+  setMainLang(lang)
+  await saveLanguage(lang)
+  return true
+})
 
 ipcMain.handle('kd:set-last-active', async (_e, id: string) => {
   deviceStore.lastActiveId = id
@@ -493,17 +509,17 @@ ipcMain.handle('kd:exec', async (_e, cmd: string) => {
 
 // ---------- 文件管理 ----------
 
-ipcMain.handle('kd:fs-list', (_e, path: string) => fileService?.list(path) ?? { path, entries: [], error: '未连接' })
-ipcMain.handle('kd:fs-mkdir', (_e, path: string) => fileService?.mkdir(path) ?? '未连接')
-ipcMain.handle('kd:fs-rename', (_e, from: string, to: string) => fileService?.rename(from, to) ?? '未连接')
-ipcMain.handle('kd:fs-delete', (_e, path: string, isDir: boolean) => fileService?.delete(path, isDir) ?? '未连接')
-ipcMain.handle('kd:fs-chmod', (_e, path: string, mode: number) => fileService?.chmod(path, mode) ?? '未连接')
-ipcMain.handle('kd:fs-read-text', (_e, path: string) => fileService?.readTextFile(path) ?? { text: '', error: '未连接' })
+ipcMain.handle('kd:fs-list', (_e, path: string) => fileService?.list(path) ?? { path, entries: [], error: tMain('main.notConnected') })
+ipcMain.handle('kd:fs-mkdir', (_e, path: string) => fileService?.mkdir(path) ?? tMain('main.notConnected'))
+ipcMain.handle('kd:fs-rename', (_e, from: string, to: string) => fileService?.rename(from, to) ?? tMain('main.notConnected'))
+ipcMain.handle('kd:fs-delete', (_e, path: string, isDir: boolean) => fileService?.delete(path, isDir) ?? tMain('main.notConnected'))
+ipcMain.handle('kd:fs-chmod', (_e, path: string, mode: number) => fileService?.chmod(path, mode) ?? tMain('main.notConnected'))
+ipcMain.handle('kd:fs-read-text', (_e, path: string) => fileService?.readTextFile(path) ?? { text: '', error: tMain('main.notConnected') })
 
 ipcMain.handle('kd:fs-upload', async (_e, remoteDir: string) => {
   const win = BrowserWindow.getFocusedWindow() ?? mainWindow
   const { canceled, filePaths } = await dialog.showOpenDialog(win!, {
-    title: '选择要上传的文件或文件夹',
+    title: tMain('main.pickUploadTitle'),
     properties: ['openFile', 'multiSelections', 'openDirectory', 'createDirectory']
   })
   if (canceled || !filePaths.length || !fileService) return 0
@@ -524,7 +540,7 @@ ipcMain.handle('kd:fs-download', async (_e, remotePath: string) => {
   const win = BrowserWindow.getFocusedWindow() ?? mainWindow
   const name = remotePath.split('/').filter(Boolean).pop() ?? 'file'
   const { canceled, filePath } = await dialog.showSaveDialog(win!, {
-    title: '保存到本机',
+    title: tMain('main.saveToTitle'),
     defaultPath: join(app.getPath('downloads'), name)
   })
   if (canceled || !filePath || !fileService) return false
@@ -535,12 +551,12 @@ ipcMain.handle('kd:fs-download', async (_e, remotePath: string) => {
 // ---------- 内容管理（书库） ----------
 
 ipcMain.handle('kd:library-scan', async () =>
-  libraryService?.scan() ?? { books: [], error: '未连接', durationMs: 0, cached: 0 }
+  libraryService?.scan() ?? { books: [], error: tMain('main.notConnected'), durationMs: 0, cached: 0 }
 )
 
 ipcMain.handle('kd:library-get-cover', (_e, id: string) => libraryService?.getCoverDataUrl(id) ?? null)
 
-ipcMain.handle('kd:library-delete', (_e, id: string) => libraryService?.deleteBook(id) ?? '未连接')
+ipcMain.handle('kd:library-delete', (_e, id: string) => libraryService?.deleteBook(id) ?? tMain('main.notConnected'))
 
 ipcMain.handle('kd:library-upload', async (_e, localPaths: string[]) => {
   if (!libraryService || !localPaths.length) return 0
@@ -550,14 +566,14 @@ ipcMain.handle('kd:library-upload', async (_e, localPaths: string[]) => {
 ipcMain.handle('kd:library-pick-books', async () => {
   const win = BrowserWindow.getFocusedWindow() ?? mainWindow
   const { canceled, filePaths } = await dialog.showOpenDialog(win!, {
-    title: '选择要上传的电子书',
+    title: tMain('main.pickBooksTitle'),
     properties: ['openFile', 'multiSelections'],
     filters: [
       {
-        name: '电子书',
+        name: tMain('main.ebookFiles'),
         extensions: ['azw', 'azw1', 'azw2', 'azw3', 'azw4', 'mobi', 'prc', 'pdf', 'tpz', 'txt', 'epub']
       },
-      { name: '所有文件', extensions: ['*'] }
+      { name: tMain('main.allFiles'), extensions: ['*'] }
     ]
   })
   return canceled ? [] : filePaths
@@ -567,11 +583,11 @@ ipcMain.handle('kd:library-pick-books', async () => {
 // 只扫描与按用户确认的清单删除；删除前主进程会逐条复核垃圾判定（见 cleanup.ts）
 
 ipcMain.handle('kd:cleanup-scan', async () =>
-  cleanupService?.scan() ?? { items: [], error: '未连接', durationMs: 0, scannedDirs: 0 }
+  cleanupService?.scan() ?? { items: [], error: tMain('main.notConnected'), durationMs: 0, scannedDirs: 0 }
 )
 
 ipcMain.handle('kd:cleanup-delete', (_e, paths: string[]) =>
-  cleanupService?.delete(paths ?? []) ?? { ok: 0, failed: 0, skipped: 0, freedBytes: 0, errors: ['未连接'] }
+  cleanupService?.delete(paths ?? []) ?? { ok: 0, failed: 0, skipped: 0, freedBytes: 0, errors: [tMain('main.notConnected')] }
 )
 
 // ---------- 终端 ----------
@@ -593,7 +609,7 @@ ipcMain.handle('kd:term-open', async (_e, cols: number, rows: number) => {
     const setup = [
       'export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8',
       "ll() { if [ $# -eq 0 ]; then set -- .; fi; for d in \"$@\"; do if [ -d \"$d\" ]; then for f in \"$d\"/*; do [ -e \"$f\" ] && echo \"  $f\"; done; else echo \"$d\"; fi; done; }",
-      'echo "提示: 设备 busybox 不支持 Unicode，ls 中文文件名会显示为 ?，可用 ll 查看"'
+      'echo "' + tMain('main.termHint') + '"'
     ].join('\n')
     termStream.write(setup + '\r')
   }, 800)
@@ -631,6 +647,8 @@ function statSyncSafe(p: string): import('fs').Stats | null {
 
 void app.whenReady().then(async () => {
   await loadDeviceStore()
+  appLang = await loadLanguage()
+  setMainLang(appLang)
   powerMonitor.on('resume', () => ssh.retryNow())
   powerMonitor.on('unlock-screen', () => ssh.retryNow())
   createWindow()

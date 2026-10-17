@@ -9,6 +9,7 @@
 //      复核不通过则跳过——即使界面传错路径也不会误删正常文件
 import type { KindleSSH } from './kindle'
 import type { CleanupDeleteResult, CleanupProgress, CleanupScanResult, JunkCategory, JunkItem } from '../shared/types'
+import { tMain } from './i18n'
 
 const US_ROOT = '/mnt/us'
 const DOC_ROOT = `${US_ROOT}/documents`
@@ -157,7 +158,7 @@ export class CleanupService {
           size: clip.size,
           fileCount: 1,
           mtimeMs: clip.mtime * 1000,
-          reason: '所有标注/剪贴的汇总导出，随使用不断增长；删除会丢失剪贴历史（设备会自动重建）'
+          reason: tMain('main.cleanupClippings')
         })
       }
 
@@ -175,7 +176,7 @@ export class CleanupService {
                 items.push({
                   id: path, path, name, category: 'sys-junk', isDir: true,
                   size: st.size, fileCount: st.fileCount, mtimeMs: (e.attrs.mtime ?? 0) * 1000,
-                  reason: 'macOS 通过 USB「删除」文件时落入的回收站目录'
+                  reason: tMain('main.cleanupTrash')
                 })
               }
             }
@@ -202,7 +203,7 @@ export class CleanupService {
             items.push({
               id: t, path: t, name: t.slice(SYSTEM_ROOT.length + 1), category: 'temp', isDir: true, dirContents: true,
               size: inner.size, fileCount: inner.fileCount, mtimeMs: st.mtime * 1000,
-              reason: '系统临时目录；清空内容、保留目录本身'
+              reason: tMain('main.cleanupTemp')
             })
           }
         }
@@ -221,11 +222,11 @@ export class CleanupService {
   }
 
   private junkFileReason(name: string): string {
-    if (name.startsWith('.fuse_hidden')) return 'FUSE 文件系统删除残留（已删除但仍被占用的文件）'
-    if (name === '.DS_Store') return 'macOS Finder 目录元数据'
-    if (name.startsWith('._')) return 'macOS AppleDouble 资源叉文件（拷贝时产生）'
-    if (name === 'Thumbs.db' || name === 'desktop.ini') return 'Windows 资源管理器元数据'
-    return '跨系统残留文件'
+    if (name.startsWith('.fuse_hidden')) return tMain('main.cleanupFuseHidden')
+    if (name === '.DS_Store') return tMain('main.cleanupDsStore')
+    if (name.startsWith('._')) return tMain('main.cleanupAppleDouble')
+    if (name === 'Thumbs.db' || name === 'desktop.ini') return tMain('main.cleanupThumbs')
+    return tMain('main.cleanupCrossSys')
   }
 
   /** documents 树：每个目录里根据同目录文件判定孤儿伴生目录，进入子目录时发现空目录单独标记 */
@@ -243,7 +244,7 @@ export class CleanupService {
     if (entries.length === 0 && dir !== DOC_ROOT && !PROTECTED_DOC_DIRS.has(dir)) {
       items.push({
         id: dir, path: dir, name: dir.slice(dir.lastIndexOf('/') + 1), category: 'empty-dir', isDir: true,
-        size: 0, fileCount: 0, mtimeMs: dirMtimeMs, reason: 'documents 下的空目录，无任何内容'
+        size: 0, fileCount: 0, mtimeMs: dirMtimeMs, reason: tMain('main.cleanupEmptyDir')
       })
       return
     }
@@ -257,10 +258,10 @@ export class CleanupService {
       if (isDirMode(e.attrs.mode)) {
         let reason = ''
         if (name.endsWith('.sdr')) {
-          reason = '对应的电子书已不在设备上，残留的标注/书签/进度目录'
+          reason = tMain('main.cleanupOrphanSdr')
           if (hasBookForSdr(name.slice(0, -4), fileNames)) continue
         } else if (name.endsWith('.dir')) {
-          reason = '对应的电子书已不在设备上，残留的伴生目录'
+          reason = tMain('main.cleanupOrphanDir')
           if (fileNames.includes(name.slice(0, -4))) continue
         } else {
           // 普通子目录（书库文件夹）：隐藏目录不深入，伴生目录不属于书库内容也不深入
@@ -398,7 +399,7 @@ export class CleanupService {
   }
 
   private async removeRemote(path: string, isDir: boolean, depth: number): Promise<void> {
-    if (depth > MAX_DELETE_DEPTH) throw new Error('目录嵌套过深，已中止')
+    if (depth > MAX_DELETE_DEPTH) throw new Error(tMain('main.cleanupDeepNest'))
     const sftp = await this.ssh.getSftp()
     if (!isDir) {
       await sftpCall((cb) => sftp.unlink(path, cb as never))

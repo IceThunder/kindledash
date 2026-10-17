@@ -1,5 +1,6 @@
 import type { KindleSSH } from './kindle'
 import type { StatsSnapshot, ProcInfo, DeviceInfo, StorageInfo, ThreadInfo } from '../shared/types'
+import { tMain } from './i18n'
 
 // 一次 SSH 往返拉取全部性能数据，降低设备端开销
 export const STATS_SCRIPT = [
@@ -255,7 +256,7 @@ export async function fetchDeviceInfo(ssh: KindleSSH): Promise<DeviceInfo> {
   return {
     model,
     hardware,
-    firmware: firmware || '未知',
+    firmware: firmware || tMain('main.firmwareUnknown'),
     kernel: (sections['#K'] ?? '').trim(),
     // /proc/usid 形如 B024...03M0#C，去掉 # 校验和后缀
     serial: ((sections['#H'] ?? '').trim().split('#')[0]) || pick('Serial'),

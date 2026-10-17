@@ -248,13 +248,13 @@ button {
   gap: 8px;
   margin-top: 8px;
 }
-.footer-btn {
+.btn.small.footer-btn {
   flex: 1;
   height: 42px;
   min-width: 0;
   padding: 0;
   justify-content: center;
-  font-size: 23px;
+  font-size: 24px;
   line-height: 1;
 }
 .footer-disconnect {
@@ -293,13 +293,13 @@ button {
   padding: 4px 8px 6px;
 }
 
-.menu-intervals {
+.menu-langs {
   display: flex;
   gap: 4px;
   flex-wrap: wrap;
   padding: 0 4px 6px;
 }
-.menu-intervals .btn {
+.menu-langs .btn {
   padding: 3px 8px;
   font-size: 12px;
 }

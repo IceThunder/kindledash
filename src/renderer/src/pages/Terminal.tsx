@@ -3,9 +3,11 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { kd } from '../api'
 import { useConn } from '../store'
+import { useI18n, tNow } from '../i18n'
 
 export default function TermPage(): JSX.Element {
   const { state } = useConn()
+  const { t } = useI18n()
   const boxRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -53,7 +55,8 @@ export default function TermPage(): JSX.Element {
     if (!term) return
     const offData = kd.onTermData((d) => term.write(new Uint8Array(d)))
     const offExit = kd.onTermExit(() => {
-      term.write('\r\n\x1b[33m― 连接已关闭，点击「重新打开」―\x1b[0m\r\n')
+      // 事件发生在语言切换后的任意时刻，用 tNow 取当前语言的文案
+      term.write(`\r\n\x1b[33m${tNow('term.closed')}\x1b[0m\r\n`)
       setOpen(false)
     })
     const input = term.onData((data) => void kd.termInput(data))
@@ -90,25 +93,25 @@ export default function TermPage(): JSX.Element {
   return (
     <div className="term-page">
       <div className="page-title" style={{ marginBottom: 0 }}>
-        远程终端
+        {t('nav.term')}
         <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--text-dim)' }}>root shell over SSH</span>
         <span style={{ flex: 1 }} />
         {state === 'connected' && !open && (
           <button className="btn primary small" onClick={() => void openShell()}>
-            打开终端
+            {t('term.open')}
           </button>
         )}
         {open && (
           <span style={{ fontSize: 12, color: 'var(--green)' }}>
             <span className="status-dot ok" />
-            已连接
+            {t('conn.connected')}
           </span>
         )}
       </div>
-      {state !== 'connected' && <div className="empty">设备未连接</div>}
+      {state !== 'connected' && <div className="empty">{t('common.deviceNotConnected')}</div>}
       {state === 'connected' && error && (
         <div className="card" style={{ borderColor: 'var(--red)', padding: '8px 14px', fontSize: 13 }}>
-          打开失败：{error}
+          {t('term.openFailed', { err: error })}
         </div>
       )}
       {state === 'connected' && (
@@ -116,7 +119,7 @@ export default function TermPage(): JSX.Element {
       )}
       {state === 'connected' && !open && !error && (
         <div className="empty" style={{ paddingTop: 120 }}>
-          点击右上角「打开终端」在设备上启动 root shell
+          {t('term.hint')}
         </div>
       )}
     </div>

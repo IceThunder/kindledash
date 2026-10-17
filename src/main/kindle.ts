@@ -7,6 +7,7 @@ import path from 'path'
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import { Duplex } from 'stream'
 import type { ConnectionSettings, ConnState } from '../shared/types'
+import { tMain } from './i18n'
 
 export interface ExecResult {
   stdout: Buffer
@@ -172,12 +173,12 @@ export class KindleSSH extends EventEmitter {
         try {
           opts.privateKey = readFileSync(selectedKeyPath)
         } catch (e) {
-          this.lastError = `无法读取私钥: ${(e as Error).message}`
+          this.lastError = tMain('main.keyReadFailed', { err: (e as Error).message })
           this.setState('error')
           return Promise.reject(new Error(this.lastError))
         }
       } else if (!agent) {
-        this.lastError = '未找到 SSH 私钥；请填写私钥路径，或启动 ssh-agent 后重试'
+        this.lastError = tMain('main.keyNotFound')
         this.setState('error')
         return Promise.reject(new Error(this.lastError))
       }
@@ -202,8 +203,10 @@ export class KindleSSH extends EventEmitter {
           // the same destination through the normal route (as /usr/bin/ssh
           // does). The next attempt must therefore drop localAddress.
           this.bypassLocalBind = true
-          this.lastError +=
-            ` — 无法到达 Kindle（已${localAddress ? `绑定本机 ${localAddress}` : '使用系统路由'}）；请确认 Kindle 唤醒，并在 Clash 中将 ${host} 或 192.168.0.0/16 设为 DIRECT`
+          this.lastError += tMain('main.unreachable', {
+            bind: localAddress ? tMain('main.boundLocal', { addr: localAddress }) : tMain('main.systemRoute'),
+            host
+          })
           void this.probeLocalNetworkPermission()
           void this.warmupWithSystemSsh(settings, selectedKeyPath)
         }
@@ -359,7 +362,7 @@ export class KindleSSH extends EventEmitter {
 
   private ensureConn(): Client {
     if (!this.conn || this._state !== 'connected') {
-      throw new Error('SSH 未连接')
+      throw new Error(tMain('main.sshNotConnected'))
     }
     return this.conn
   }
@@ -375,7 +378,7 @@ export class KindleSSH extends EventEmitter {
   private execDirect(cmd: string, timeoutMs: number): Promise<ExecResult> {
     const conn = this.ensureConn()
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`命令超时: ${cmd.slice(0, 60)}`)), timeoutMs)
+      const timer = setTimeout(() => reject(new Error(tMain('main.cmdTimeout', { cmd: cmd.slice(0, 60) }))), timeoutMs)
       conn.exec(cmd, (err, stream) => {
         if (err) {
           clearTimeout(timer)

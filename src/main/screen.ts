@@ -1,5 +1,6 @@
 import { gunzipSync } from 'zlib'
 import type { KindleSSH } from './kindle'
+import { tMain } from './i18n'
 import type { ScreenFrame } from '../shared/types'
 
 // Paperwhite 2: 虚拟宽 768（可见 758），8bpp 灰度，活跃帧缓冲在偏移 0，高度 1024
@@ -64,11 +65,11 @@ export class ScreenService {
       try {
         raw = gunzipSync(r.stdout)
       } catch {
-        this.onError?.('屏幕数据解压失败')
+        this.onError?.(tMain('main.screenDecompress'))
         return
       }
       if (raw.length < FB_BYTES) {
-        this.onError?.(`屏幕数据不完整 (${raw.length}/${FB_BYTES})`)
+        this.onError?.(tMain('main.screenIncomplete', { a: raw.length, b: FB_BYTES }))
         return
       }
       const changed = !this.lastRaw || !this.lastRaw.equals(raw)
@@ -84,7 +85,7 @@ export class ScreenService {
     } catch (e) {
       this.once = false
       const msg = (e as Error).message
-      if (!msg.includes('未连接')) this.onError?.(msg)
+      if (!msg.includes(tMain('main.notConnected'))) this.onError?.(msg)
     } finally {
       this.busy = false
     }

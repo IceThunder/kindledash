@@ -1,4 +1,5 @@
 import React from 'react'
+import { useI18n } from '../i18n'
 
 /** 轻量 SVG 折线/面积图 */
 export function Sparkline({
@@ -122,7 +123,7 @@ export function Ring({
 export function ConfirmDialog({
   title,
   body,
-  confirmText = '确认',
+  confirmText,
   danger,
   onConfirm,
   onCancel
@@ -134,6 +135,7 @@ export function ConfirmDialog({
   onConfirm: () => void
   onCancel: () => void
 }): JSX.Element {
+  const { t } = useI18n()
   return (
     <div className="modal-mask" onClick={(e) => e.target === e.currentTarget && onCancel()}>
       <div className="modal" style={{ width: 400 }}>
@@ -141,10 +143,10 @@ export function ConfirmDialog({
         <div style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.7 }}>{body}</div>
         <div className="form-actions">
           <button className="btn" onClick={onCancel}>
-            取消
+            {t('common.cancel')}
           </button>
           <button className={danger ? 'btn danger' : 'btn primary'} onClick={onConfirm}>
-            {confirmText}
+            {confirmText ?? t('common.ok')}
           </button>
         </div>
       </div>

@@ -1,16 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import { kd } from '../api'
 import { useConn, fmtTime } from '../store'
+import { useI18n } from '../i18n'
 import type { ScreenFrame } from '../../../shared/types'
 
 const NATIVE_W = 758
 const NATIVE_H = 1024
 const MAX_BOX_H = 560
 const BOX_PADDING = 24
+const SCREEN_INTERVAL = 5000
 
-/** 屏幕镜像卡片（嵌入总览页；刷新间隔由设置菜单控制） */
-export default function ScreenMirror({ interval }: { interval: number }): JSX.Element {
+/** 屏幕镜像卡片（嵌入总览页，固定间隔自动刷新） */
+export default function ScreenMirror(): JSX.Element {
   const { state } = useConn()
+  const { t } = useI18n()
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const boxRef = useRef<HTMLDivElement | null>(null)
   const [lastTs, setLastTs] = useState(0)
@@ -73,13 +76,13 @@ export default function ScreenMirror({ interval }: { interval: number }): JSX.El
     if (state !== 'connected') return
     setError('')
     const timer = window.setTimeout(() => {
-      void kd.startScreen(interval)
+      void kd.startScreen(SCREEN_INTERVAL)
     }, 1800)
     return () => {
       window.clearTimeout(timer)
       void kd.stopScreen()
     }
-  }, [state, interval])
+  }, [state])
 
   useEffect(() => {
     const box = boxRef.current
@@ -108,19 +111,19 @@ export default function ScreenMirror({ interval }: { interval: number }): JSX.El
   return (
     <div className="card">
       <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span>屏幕镜像</span>
+        <span>{t('screen.title')}</span>
         <span style={{ fontWeight: 400, color: 'var(--text-faint)', fontSize: 12 }}>
-          {lastChangeTs ? `更新于 ${fmtTime(lastChangeTs)}` : '等待画面…'}
+          {lastChangeTs ? t('screen.updatedAt', { time: fmtTime(lastChangeTs) }) : t('screen.waiting')}
         </span>
         <span style={{ flex: 1 }} />
         <button className="btn small" onClick={() => void kd.refreshScreen()} disabled={!connected}>
-          ⟳ 刷新
+          ⟳ {t('common.refresh')}
         </button>
         <button className="btn small" onClick={() => void savePng()} disabled={!lastTs}>
-          ⬇ 截图
+          ⬇ {t('screen.screenshot')}
         </button>
       </div>
-          <div
+      <div
         className="screen-canvas-box"
         ref={boxRef}
         style={{
@@ -135,25 +138,9 @@ export default function ScreenMirror({ interval }: { interval: number }): JSX.El
         }}
       >
         <canvas ref={canvasRef} style={{ width: dispW, height: dispH, display: 'block' }} />
-        {!lastTs && connected && interval > 0 && (
+        {!lastTs && connected && (
           <div className="empty" style={{ position: 'absolute', color: '#8b949e', background: '#000', width: '100%', height: '100%' }}>
-            正在获取屏幕…
-          </div>
-        )}
-        {interval <= 0 && (
-          <div
-            style={{
-              position: 'absolute',
-              top: 10,
-              left: 10,
-              background: 'rgba(210,153,34,0.92)',
-              color: '#fff',
-              borderRadius: 12,
-              padding: '3px 12px',
-              fontSize: 12
-            }}
-          >
-            自动刷新已关闭（在左下角 ⚙ 设置中开启）
+            {t('screen.fetching')}
           </div>
         )}
         {!connected && lastTs > 0 && (
@@ -172,7 +159,7 @@ export default function ScreenMirror({ interval }: { interval: number }): JSX.El
               zIndex: 2
             }}
           >
-            连接已断开 · 显示最后画面（{fmtTime(lastChangeTs || lastTs)}）
+            {t('screen.disconnectedLast', { time: fmtTime(lastChangeTs || lastTs) })}
           </div>
         )}
       </div>

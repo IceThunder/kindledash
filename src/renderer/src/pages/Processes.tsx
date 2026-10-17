@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { kd } from '../api'
-import { useConn, useStats, fmtKB, STATE_LABEL, STATE_COLOR } from '../store'
+import { useConn, useStats, fmtKB, stateLabel, STATE_COLOR } from '../store'
+import { useI18n } from '../i18n'
 import { ConfirmDialog, Sparkline, Ring } from '../components/ui'
 import type { ProcInfo, ThreadInfo } from '../../../shared/types'
 
@@ -9,6 +10,7 @@ type SortKey = 'cpu' | 'mem' | 'pid' | 'name' | 'threads'
 export default function Processes(): JSX.Element {
   const { state } = useConn()
   const { stats, history } = useStats()
+  const { t } = useI18n()
   const [filter, setFilter] = useState('')
   const [hideKernel, setHideKernel] = useState(false)
   const [sortKey, setSortKey] = useState<SortKey>('cpu')
@@ -28,7 +30,7 @@ export default function Processes(): JSX.Element {
     setThreadsLoading(true)
     void kd
       .listThreads(selected)
-      .then((t) => alive && setThreads(t))
+      .then((th) => alive && setThreads(th))
       .catch(() => alive && setThreads(null))
       .finally(() => alive && setThreadsLoading(false))
     return () => {
@@ -69,7 +71,7 @@ export default function Processes(): JSX.Element {
       }
     })
     return sorted
-  }, [stats, filter, hideKernel, sortKey, sortAsc, hideKernel])
+  }, [stats, filter, hideKernel, sortKey, sortAsc])
 
   const selectedProc = procs.find((p) => p.pid === selected) ?? stats?.procs.find((p) => p.pid === selected) ?? null
 
@@ -89,33 +91,33 @@ export default function Processes(): JSX.Element {
   )
 
   if (state !== 'connected') {
-    return <div className="empty">设备未连接</div>
+    return <div className="empty">{t('common.deviceNotConnected')}</div>
   }
 
   return (
     <div style={{ display: 'flex', gap: 16, height: '100%', flexDirection: 'column' }}>
       <div className="page-title" style={{ marginBottom: 0 }}>
-        进程 / 线程
+        {t('nav.procs')}
         <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--text-dim)' }}>
-          {stats ? `${stats.procs.length} 个进程` : '等待数据…'}
+          {stats ? t('procs.count', { n: stats.procs.length }) : t('common.waitingData')}
         </span>
       </div>
 
       <div className="process-telemetry">
         <div className="card">
-          <div className="card-title">CPU 使用率</div>
+          <div className="card-title">{t('procs.cpuTitle')}</div>
           {stats ? (
             <>
               <Sparkline data={history.cpu} max={100} color="#58a6ff" height={105} />
               <div className="process-telemetry-caption">
-                <span>最近 {history.cpu.length} 秒</span>
-                <span>负载 {stats.load.map((l) => l.toFixed(2)).join(' / ')}</span>
+                <span>{t('procs.recentSeconds', { n: history.cpu.length })}</span>
+                <span>{t('procs.load', { v: stats.load.map((l) => l.toFixed(2)).join(' / ') })}</span>
               </div>
             </>
-          ) : <div className="empty" style={{ padding: 30 }}>等待数据…</div>}
+          ) : <div className="empty" style={{ padding: 30 }}>{t('common.waitingData')}</div>}
         </div>
         <div className="card">
-          <div className="card-title">内存明细</div>
+          <div className="card-title">{t('procs.memTitle')}</div>
           {stats?.mem ? (() => {
             const mem = stats.mem
             const usedPct = mem.totalKB ? (mem.usedKB / mem.totalKB) * 100 : 0
@@ -123,13 +125,13 @@ export default function Processes(): JSX.Element {
             const swapUsedKB = mem.swapTotalKB - mem.swapFreeKB
             const swapPct = mem.swapTotalKB ? (swapUsedKB / mem.swapTotalKB) * 100 : 0
             return <div className="process-memory-rings">
-              <Ring percent={usedPct} label="应用使用" value={`${Math.round(usedPct)}%`} color="#bc8cff" size={88} />
-              <Ring percent={cachePct} label="缓存" value={fmtKB(mem.cachedKB)} color="#58a6ff" size={88} />
+              <Ring percent={usedPct} label={t('procs.memApp')} value={`${Math.round(usedPct)}%`} color="#bc8cff" size={88} />
+              <Ring percent={cachePct} label={t('procs.memCache')} value={fmtKB(mem.cachedKB)} color="#58a6ff" size={88} />
               <Ring percent={mem.totalKB ? (mem.buffersKB / mem.totalKB) * 100 : 0} label="Buffers" value={fmtKB(mem.buffersKB)} color="#d29922" size={88} />
               <Ring percent={swapPct} label="Swap" value={fmtKB(swapUsedKB)} color={swapPct > 60 ? '#f85149' : '#3fb950'} size={88} />
-              <Ring percent={mem.totalKB ? (mem.freeKB / mem.totalKB) * 100 : 0} label="空闲" value={fmtKB(mem.freeKB)} color="#8b949e" size={88} />
+              <Ring percent={mem.totalKB ? (mem.freeKB / mem.totalKB) * 100 : 0} label={t('procs.memFree')} value={fmtKB(mem.freeKB)} color="#8b949e" size={88} />
             </div>
-          })() : <div className="empty" style={{ padding: 30 }}>等待数据…</div>}
+          })() : <div className="empty" style={{ padding: 30 }}>{t('common.waitingData')}</div>}
         </div>
       </div>
 
@@ -137,13 +139,13 @@ export default function Processes(): JSX.Element {
         <input
           className="input"
           style={{ width: 260 }}
-          placeholder="按名称或 PID 过滤…"
+          placeholder={t('procs.filterPlaceholder')}
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
         <label style={{ fontSize: 13, color: 'var(--text-dim)', display: 'flex', alignItems: 'center', gap: 6 }}>
           <input type="checkbox" checked={hideKernel} onChange={(e) => setHideKernel(e.target.checked)} />
-          隐藏内核线程
+          {t('procs.hideKernel')}
         </label>
       </div>
 
@@ -153,12 +155,12 @@ export default function Processes(): JSX.Element {
             <thead>
               <tr>
                 {th('pid', 'PID')}
-                {th('name', '名称')}
-                <th>状态</th>
+                {th('name', t('files.colName'))}
+                <th>{t('procs.colState')}</th>
                 <th>CPU%</th>
-                {th('mem', '内存 RSS')}
-                <th>虚拟内存</th>
-                {th('threads', '线程')}
+                {th('mem', t('procs.colRss'))}
+                <th>{t('procs.colVsize')}</th>
+                {th('threads', t('procs.colThreads'))}
               </tr>
             </thead>
             <tbody>
@@ -176,7 +178,7 @@ export default function Processes(): JSX.Element {
                   </td>
                   <td>
                     <span className="badge" style={{ background: (STATE_COLOR[p.state] ?? '#8b949e') + '26', color: STATE_COLOR[p.state] ?? 'var(--text-dim)' }}>
-                      {STATE_LABEL[p.state] ?? p.state}
+                      {stateLabel(p.state)}
                     </span>
                   </td>
                   <td style={{ color: p.cpuPercent > 30 ? 'var(--yellow)' : p.cpuPercent > 0 ? 'var(--green)' : 'var(--text-faint)' }}>
@@ -190,7 +192,7 @@ export default function Processes(): JSX.Element {
               {!procs.length && (
                 <tr>
                   <td colSpan={7} className="empty">
-                    {stats ? '没有匹配的进程' : '等待数据…'}
+                    {stats ? t('procs.noMatch') : t('common.waitingData')}
                   </td>
                 </tr>
               )}
@@ -202,60 +204,60 @@ export default function Processes(): JSX.Element {
           {selectedProc ? (
             <>
               <div className="card-title">
-                进程详情
+                {t('procs.detail')}
                 <button className="btn small" style={{ float: 'right', marginRight: 6 }} onClick={refreshThreads} disabled={threadsLoading}>
-                  {threadsLoading ? '读取中…' : '刷新线程'}
+                  {threadsLoading ? t('common.loading') : t('procs.refreshThreads')}
                 </button>
                 <button className="btn small" style={{ float: 'right' }} onClick={() => setSelected(null)}>
-                  关闭
+                  {t('common.close')}
                 </button>
               </div>
               <dl className="kv" style={{ marginBottom: 12 }}>
-                <dt>名称</dt>
+                <dt>{t('files.colName')}</dt>
                 <dd>{selectedProc.comm}</dd>
                 <dt>PID</dt>
                 <dd>{selectedProc.pid}</dd>
-                <dt>父进程</dt>
+                <dt>{t('procs.ppid')}</dt>
                 <dd>{selectedProc.ppid}</dd>
-                <dt>状态</dt>
-                <dd>{STATE_LABEL[selectedProc.state] ?? selectedProc.state}</dd>
+                <dt>{t('procs.colState')}</dt>
+                <dd>{stateLabel(selectedProc.state)}</dd>
                 <dt>CPU</dt>
                 <dd>{selectedProc.cpuPercent.toFixed(1)}%</dd>
-                <dt>内存 RSS</dt>
+                <dt>{t('procs.colRss')}</dt>
                 <dd>{fmtKB(selectedProc.rssKB)}</dd>
-                <dt>虚拟内存</dt>
+                <dt>{t('procs.colVsize')}</dt>
                 <dd>{fmtKB(selectedProc.vsizeKB)}</dd>
-                <dt>线程数</dt>
+                <dt>{t('procs.threadsCount')}</dt>
                 <dd>{selectedProc.threads}</dd>
               </dl>
               <button className="btn danger small" onClick={() => setKillTarget(selectedProc)}>
-                结束进程 (kill)
+                {t('procs.kill')}
               </button>
 
               <div className="card-title" style={{ marginTop: 16 }}>
-                线程（{threads?.length ?? selectedProc.threads}）
+                {t('procs.threadsOf', { n: threads?.length ?? selectedProc.threads })}
               </div>
-              {threadsLoading && !threads && <div className="empty" style={{ padding: 16 }}>读取线程…</div>}
+              {threadsLoading && !threads && <div className="empty" style={{ padding: 16 }}>{t('procs.loadingThreads')}</div>}
               <table className="tbl">
                 <thead>
                   <tr>
                     <th>TID</th>
-                    <th>名称</th>
-                    <th>状态</th>
+                    <th>{t('files.colName')}</th>
+                    <th>{t('procs.colState')}</th>
                     <th>CPU%</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(threads ?? []).map((t) => (
-                    <tr key={t.tid}>
-                      <td className="mono">{t.tid}</td>
-                      <td style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.comm}</td>
+                  {(threads ?? []).map((tr) => (
+                    <tr key={tr.tid}>
+                      <td className="mono">{tr.tid}</td>
+                      <td style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis' }}>{tr.comm}</td>
                       <td>
-                        <span style={{ color: STATE_COLOR[t.state] ?? 'var(--text-dim)' }}>
-                          {STATE_LABEL[t.state] ?? t.state}
+                        <span style={{ color: STATE_COLOR[tr.state] ?? 'var(--text-dim)' }}>
+                          {stateLabel(tr.state)}
                         </span>
                       </td>
-                      <td>{t.cpuPercent.toFixed(1)}</td>
+                      <td>{tr.cpuPercent.toFixed(1)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -263,9 +265,9 @@ export default function Processes(): JSX.Element {
             </>
           ) : (
             <div className="empty" style={{ paddingTop: 120 }}>
-              点击左侧进程查看详情与线程
+              {t('procs.detailHint')}
               <br />
-              <span style={{ fontSize: 12 }}>线程 CPU% 通过两次采样（间隔 0.4 秒）计算</span>
+              <span style={{ fontSize: 12 }}>{t('procs.threadCpuHint')}</span>
             </div>
           )}
         </div>
@@ -273,21 +275,21 @@ export default function Processes(): JSX.Element {
 
       {killTarget && (
         <ConfirmDialog
-          title={`结束进程 ${killTarget.comm}`}
+          title={t('procs.killTitle', { name: killTarget.comm })}
           body={
             <>
-              将向 PID {killTarget.pid}（{killTarget.comm}）发送 SIGTERM。
+              {t('procs.killBodyA', { pid: killTarget.pid, name: killTarget.comm })}
               <br />
-              结束系统关键进程可能导致设备不稳定，需要重启恢复。确定继续吗？
+              {t('procs.killBody2')}
             </>
           }
-          confirmText="结束进程"
+          confirmText={t('procs.killConfirm')}
           danger
           onConfirm={async () => {
             const pid = killTarget.pid
             setKillTarget(null)
             const r = await kd.kill(pid, 'TERM')
-            setToast(r.includes('EXIT:0') ? `已发送 SIGTERM 到 ${pid}` : `失败: ${r}`)
+            setToast(r.includes('EXIT:0') ? t('procs.killSent', { pid }) : t('procs.killFailed', { r }))
             setTimeout(() => setToast(''), 3000)
           }}
           onCancel={() => setKillTarget(null)}

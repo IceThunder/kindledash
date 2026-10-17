@@ -10,6 +10,7 @@ import { join } from 'path'
 import type { SFTPWrapper } from 'ssh2'
 import type { KindleSSH } from './kindle'
 import { detectImageFormat, parseRecord0, readNumRecords, readRecordOffsets } from './mobi'
+import { tMain } from './i18n'
 import type { LibraryBook, LibraryScanProgress, LibraryScanResult, TransferProgress } from '../shared/types'
 
 const DOC_ROOT = '/mnt/us/documents'
@@ -120,7 +121,7 @@ export class LibraryService {
   private async doScan(): Promise<LibraryScanResult> {
     const started = Date.now()
     try {
-      this.onScanProgress({ phase: 'list', done: 0, total: 0, current: '读取设备目录…' })
+      this.onScanProgress({ phase: 'list', done: 0, total: 0, current: tMain('main.readingDirs') })
       const files: RemoteFile[] = []
       await this.walk(DOC_ROOT, 0, files)
       files.sort((a, b) => a.path.localeCompare(b.path))

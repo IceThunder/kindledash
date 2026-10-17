@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { kd } from '../api'
 import { useConn } from '../store'
+import { useI18n, localeTag } from '../i18n'
 import { ConfirmDialog } from '../components/ui'
+import type { I18nKey } from '../../../shared/i18n'
 import type { LibraryBook, LibraryScanProgress } from '../../../shared/types'
 
-const SORTS = [
-  { id: 'recent', label: '最近添加' },
-  { id: 'title', label: '书名' },
-  { id: 'author', label: '作者' },
-  { id: 'size', label: '大小' }
-] as const
+const SORTS: { id: string; labelKey: I18nKey }[] = [
+  { id: 'recent', labelKey: 'library.sortRecent' },
+  { id: 'title', labelKey: 'library.sortTitle' },
+  { id: 'author', labelKey: 'library.sortAuthor' },
+  { id: 'size', labelKey: 'library.sortSize' }
+]
 
-type SortId = (typeof SORTS)[number]['id']
+type SortId = 'recent' | 'title' | 'author' | 'size'
 
 const FORMAT_LABEL: Record<string, string> = {
   azw3: 'AZW3',
@@ -48,6 +50,7 @@ function Cover({ book, url, big }: { book: LibraryBook; url?: string; big?: bool
 
 export default function Library(): JSX.Element {
   const { state } = useConn()
+  const { t } = useI18n()
   const [books, setBooks] = useState<LibraryBook[]>([])
   const [scanning, setScanning] = useState(false)
   const [progress, setProgress] = useState<LibraryScanProgress | null>(null)
@@ -68,7 +71,12 @@ export default function Library(): JSX.Element {
     const r = await kd.libraryScan()
     setBooks(r.books)
     setError(r.error ?? '')
-    setInfo(r.error ? '' : `共 ${r.books.length} 本 · ${(r.durationMs / 1000).toFixed(1)}s${r.cached ? `（缓存命中 ${r.cached} 本）` : ''}`)
+    setInfo(
+      r.error
+        ? ''
+        : t('library.scanSummary', { n: r.books.length, sec: (r.durationMs / 1000).toFixed(1) }) +
+            (r.cached ? t('library.cacheHit', { n: r.cached }) : '')
+    )
     setScanning(false)
     setProgress(null)
     // 封面从本地缓存逐本取回，渐进显示
@@ -77,7 +85,8 @@ export default function Library(): JSX.Element {
       const url = await kd.libraryGetCover(b.id)
       if (url) setCovers((m) => ({ ...m, [b.id]: url }))
     }
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [t])
 
   useEffect(() => {
     if (state === 'connected') void scan()
@@ -115,8 +124,8 @@ export default function Library(): JSX.Element {
       )
     })
     list = [...list].sort((a, b) => {
-      if (sort === 'title') return a.title.localeCompare(b.title, 'zh')
-      if (sort === 'author') return (a.author || '～').localeCompare(b.author || '～', 'zh')
+      if (sort === 'title') return a.title.localeCompare(b.title, localeTag())
+      if (sort === 'author') return (a.author || '～').localeCompare(b.author || '～', localeTag())
       if (sort === 'size') return b.size - a.size
       return b.mtimeMs - a.mtimeMs
     })
@@ -131,19 +140,19 @@ export default function Library(): JSX.Element {
     setConfirmDelete(null)
     setDetailId(null)
     const err = await kd.libraryDelete(b.id)
-    if (err) setError(`删除失败：${err}`)
+    if (err) setError(t('common.deleteFailed', { err }))
     else {
       setBooks((list) => list.filter((x) => x.id !== b.id))
-      setInfo(`已删除《${b.title}》`)
+      setInfo(t('library.deleted', { title: b.title }))
     }
   }
 
   const doUpload = async (): Promise<void> => {
     const paths = await kd.libraryPickBooks()
     if (!paths.length) return
-    setInfo(`上传 ${paths.length} 个文件中…`)
+    setInfo(t('library.uploading', { n: paths.length }))
     const ok = await kd.libraryUpload(paths)
-    setInfo(ok ? `已上传 ${ok} 个文件，正在刷新书库…` : '上传失败')
+    setInfo(ok ? t('library.uploaded', { n: ok }) : t('library.uploadFailed'))
     await scan()
   }
 
@@ -152,11 +161,11 @@ export default function Library(): JSX.Element {
     setDownloading(true)
     const ok = await kd.fsDownload(detail.path)
     setDownloading(false)
-    setInfo(ok ? `《${detail.title}》已保存到本地` : '已取消下载')
+    setInfo(ok ? t('library.savedLocal', { title: detail.title }) : t('library.downloadCancelled'))
   }
 
   if (state !== 'connected') {
-    return <div className="empty">设备未连接</div>
+    return <div className="empty">{t('common.deviceNotConnected')}</div>
   }
 
   const totalCovered = books.filter((b) => b.hasCover).length
@@ -164,9 +173,9 @@ export default function Library(): JSX.Element {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <div className="page-title" style={{ marginBottom: 10 }}>
-        内容管理
+        {t('nav.library')}
         <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--text-dim)' }}>
-          书库 · {books.length} 本 · {totalCovered} 本有封面
+          {t('library.summary', { total: books.length, covered: totalCovered })}
         </span>
       </div>
 
@@ -174,20 +183,20 @@ export default function Library(): JSX.Element {
         <input
           className="input"
           style={{ width: 200 }}
-          placeholder="搜索书名 / 作者 / ASIN…"
+          placeholder={t('library.searchPlaceholder')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
         <select className="input" style={{ width: 110 }} value={sort} onChange={(e) => setSort(e.target.value as SortId)}>
           {SORTS.map((s) => (
             <option key={s.id} value={s.id}>
-              {s.label}
+              {t(s.labelKey)}
             </option>
           ))}
         </select>
         <div className="fmt-filter">
           <button className={`chip ${fmt === 'all' ? 'on' : ''}`} onClick={() => setFmt('all')}>
-            全部 {books.length}
+            {t('library.allFormats', { n: books.length })}
           </button>
           {formats.map(([f, n]) => (
             <button key={f} className={`chip ${fmt === f ? 'on' : ''}`} onClick={() => setFmt(f)}>
@@ -197,10 +206,10 @@ export default function Library(): JSX.Element {
         </div>
         <div style={{ flex: 1 }} />
         <button className="btn small" onClick={() => void scan()} disabled={scanning}>
-          ⟳ 刷新
+          ⟳ {t('common.refresh')}
         </button>
         <button className="btn small primary" onClick={() => void doUpload()}>
-          ⬆ 上传图书
+          ⬆ {t('library.upload')}
         </button>
       </div>
 
@@ -208,10 +217,12 @@ export default function Library(): JSX.Element {
         <div className="card" style={{ marginBottom: 10, padding: '8px 14px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text-dim)', marginBottom: 6 }}>
             <span>
-              {progress.phase === 'list' ? '正在读取设备目录…' : `解析图书信息 ${progress.done}/${progress.total}`}
+              {progress.phase === 'list'
+                ? t('library.phaseList')
+                : t('library.phaseMeta', { done: progress.done, total: progress.total })}
               {progress.current && progress.phase === 'meta' ? ` · ${progress.current}` : ''}
             </span>
-            <span>首次扫描需逐本读取封面，之后走本地缓存</span>
+            <span>{t('library.scanHint')}</span>
           </div>
           <div className="progress-bar">
             <div
@@ -232,7 +243,7 @@ export default function Library(): JSX.Element {
         <div className="card" style={{ marginBottom: 10, padding: '8px 14px', fontSize: 12, color: 'var(--text-dim)' }}>
           {info}
           <span style={{ float: 'right' }}>
-            上传新书后如设备端未立即显示，请等待索引或重启 Kindle
+            {t('library.afterUploadHint')}
           </span>
         </div>
       )}
@@ -240,7 +251,7 @@ export default function Library(): JSX.Element {
       <div className="library-scroll">
         {!scanning && !shown.length && !error && (
           <div className="empty" style={{ paddingTop: 60 }}>
-            {books.length ? '没有符合筛选条件的图书' : 'documents 目录下暂无图书 — 点击右上角「上传图书」试试'}
+            {books.length ? t('library.noMatch') : t('library.empty')}
           </div>
         )}
         <div className="library-grid">
@@ -276,7 +287,7 @@ export default function Library(): JSX.Element {
                 <table className="tbl detail-table">
                   <tbody>
                     <tr>
-                      <td>格式</td>
+                      <td>{t('library.format')}</td>
                       <td>{FORMAT_LABEL[detail.format] ?? detail.format.toUpperCase()} · {fmtSize(detail.size)}</td>
                     </tr>
                     {detail.asin && (
@@ -287,31 +298,31 @@ export default function Library(): JSX.Element {
                     )}
                     {detail.publisher && (
                       <tr>
-                        <td>出版社</td>
+                        <td>{t('library.publisher')}</td>
                         <td>{detail.publisher}</td>
                       </tr>
                     )}
                     {detail.publishDate && (
                       <tr>
-                        <td>出版日期</td>
+                        <td>{t('library.publishDate')}</td>
                         <td>{detail.publishDate}</td>
                       </tr>
                     )}
                     <tr>
-                      <td>文件</td>
+                      <td>{t('library.file')}</td>
                       <td className="mono" style={{ wordBreak: 'break-all' }}>
                         {detail.fileName}
                       </td>
                     </tr>
                     <tr>
-                      <td>路径</td>
+                      <td>{t('library.path')}</td>
                       <td className="mono" style={{ wordBreak: 'break-all' }}>
                         {detail.path}
                       </td>
                     </tr>
                     <tr>
-                      <td>入库时间</td>
-                      <td>{detail.mtimeMs ? new Date(detail.mtimeMs).toLocaleString('zh-CN', { hour12: false }) : '—'}</td>
+                      <td>{t('library.addedAt')}</td>
+                      <td>{detail.mtimeMs ? new Date(detail.mtimeMs).toLocaleString(localeTag(), { hour12: false }) : '—'}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -319,13 +330,13 @@ export default function Library(): JSX.Element {
             </div>
             <div className="form-actions">
               <button className="btn" onClick={() => setDetailId(null)}>
-                关闭
+                {t('common.close')}
               </button>
               <button className="btn" onClick={() => void doDownload()} disabled={downloading}>
-                {downloading ? '下载中…' : '⬇ 下载到本地'}
+                {downloading ? t('library.downloading') : t('library.download')}
               </button>
               <button className="btn danger" onClick={() => setConfirmDelete(detail)}>
-                🗑 从设备删除
+                {t('library.deleteFromDevice')}
               </button>
             </div>
           </div>
@@ -334,15 +345,15 @@ export default function Library(): JSX.Element {
 
       {confirmDelete && (
         <ConfirmDialog
-          title="删除图书"
+          title={t('library.deleteTitle')}
           body={
             <>
-              确定从设备删除 <b>《{confirmDelete.title}》</b> 吗？
+              {t('library.deleteBodyA')}<b>{confirmDelete.title}</b>{t('library.deleteBodyB')}
               <br />
-              图书文件及其进度/标注目录（.sdr）都会被删除，不可恢复。
+              {t('library.deleteBody2')}
             </>
           }
-          confirmText="删除"
+          confirmText={t('common.del')}
           danger
           onConfirm={() => void doDelete()}
           onCancel={() => setConfirmDelete(null)}

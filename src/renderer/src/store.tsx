@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { kd } from './api'
+import { localeTag, tNow } from './i18n'
 import type { DeviceProfile, DeviceStore, ConnState, StatsSnapshot } from '../../shared/types'
 
 // ---------- 工具 ----------
@@ -14,24 +15,27 @@ export function fmtUptime(sec: number): string {
   const d = Math.floor(sec / 86400)
   const h = Math.floor((sec % 86400) / 3600)
   const m = Math.floor((sec % 3600) / 60)
-  if (d > 0) return `${d} 天 ${h} 小时`
-  if (h > 0) return `${h} 小时 ${m} 分`
-  return `${m} 分`
+  if (d > 0) return tNow('fmt.uptimeDH', { d, h })
+  if (h > 0) return tNow('fmt.uptimeHM', { h, m })
+  return tNow('fmt.uptimeM', { m })
 }
 
 export function fmtTime(ts: number): string {
   const d = new Date(ts)
-  return d.toLocaleTimeString('zh-CN', { hour12: false })
+  return d.toLocaleTimeString(localeTag(), { hour12: false })
 }
 
-export const STATE_LABEL: Record<string, string> = {
-  R: '运行',
-  S: '睡眠',
-  D: '等待IO',
-  Z: '僵尸',
-  T: '停止',
-  X: '死亡',
-  W: '换出'
+/** 进程/线程状态码 → 本地化标签（语言切换后按当前语言返回） */
+export function stateLabel(code: string): string {
+  const key = `procs.state${code}` as
+    | 'procs.stateR'
+    | 'procs.stateS'
+    | 'procs.stateD'
+    | 'procs.stateZ'
+    | 'procs.stateT'
+    | 'procs.stateX'
+    | 'procs.stateW'
+  return tNow(key)
 }
 
 export const STATE_COLOR: Record<string, string> = {

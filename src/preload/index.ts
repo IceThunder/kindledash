@@ -46,6 +46,8 @@ const api = {
   pickKeyFile: (): Promise<string | null> => ipcRenderer.invoke('kd:pick-key-file'),
   openExternal: (url: string) => ipcRenderer.invoke('kd:open-external', url),
   appVersion: (): Promise<string> => ipcRenderer.invoke('kd:app-version'),
+  getLanguage: (): Promise<import('../shared/i18n').Lang> => ipcRenderer.invoke('kd:get-language'),
+  setLanguage: (lang: import('../shared/i18n').Lang) => ipcRenderer.invoke('kd:set-language', lang),
 
   // 设备
   getDeviceInfo: (): Promise<DeviceInfo> => ipcRenderer.invoke('kd:device-info'),

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useConn } from '../store'
+import { useI18n } from '../i18n'
 import { kd } from '../api'
 import type { DeviceProfile } from '../../../shared/types'
 import { ConfirmDialog } from './ui'
@@ -24,6 +25,7 @@ export default function SettingsModal({
   onClose: () => void
 }): JSX.Element {
   const { connectDevice, refreshDevices } = useConn()
+  const { t } = useI18n()
   const [form, setForm] = useState<DeviceProfile>(
     editing ?? { ...EMPTY_FORM, id: crypto.randomUUID(), name: '' }
   )
@@ -44,7 +46,7 @@ export default function SettingsModal({
 
   const save = async (connectNow: boolean) => {
     if (!form.host.trim()) {
-      setError('请填写设备地址')
+      setError(t('settings.hostRequired'))
       return
     }
     setBusy(true)
@@ -78,28 +80,28 @@ export default function SettingsModal({
   return (
     <div className="modal-mask" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal">
-        <h3>{editing ? '编辑设备' : '添加设备'}</h3>
+        <h3>{editing ? t('settings.editDevice') : t('settings.addDevice')}</h3>
         <div className="form-row">
-          <label>设备名称（便于区分多台 Kindle）</label>
+          <label>{t('settings.nameLabel')}</label>
           <input
             className="input"
             value={form.name}
             onChange={(e) => set({ name: e.target.value })}
-            placeholder="例如 客厅的 Kindle"
+            placeholder={t('settings.namePlaceholder')}
           />
         </div>
         <div className="form-row">
-          <label>设备地址（IP）</label>
+          <label>{t('settings.hostLabel')}</label>
           <input
             className="input"
             value={form.host}
             onChange={(e) => set({ host: e.target.value })}
-            placeholder="例如 192.168.1.100"
+            placeholder={t('settings.hostPlaceholder')}
           />
         </div>
         <div className="form-row" style={{ display: 'flex', gap: 10 }}>
           <div style={{ flex: 1 }}>
-            <label>SSH 端口</label>
+            <label>{t('settings.portLabel')}</label>
             <input
               className="input"
               type="number"
@@ -108,40 +110,40 @@ export default function SettingsModal({
             />
           </div>
           <div style={{ flex: 1 }}>
-            <label>用户名</label>
+            <label>{t('settings.userLabel')}</label>
             <input className="input" value={form.username} onChange={(e) => set({ username: e.target.value })} />
           </div>
         </div>
         <div className="form-row">
-          <label>认证方式</label>
+          <label>{t('settings.authLabel')}</label>
           <select
             className="input"
             value={form.authMethod}
             onChange={(e) => set({ authMethod: e.target.value as 'key' | 'password' })}
           >
-            <option value="key">SSH 私钥</option>
-            <option value="password">密码</option>
+            <option value="key">{t('settings.authKey')}</option>
+            <option value="password">{t('settings.authPassword')}</option>
           </select>
         </div>
         {form.authMethod === 'key' ? (
           <div className="form-row">
-            <label>私钥路径（本机）</label>
+            <label>{t('settings.keyPathLabel')}</label>
             <div style={{ display: 'flex', gap: 8 }}>
               <input
                 className="input mono"
                 style={{ flex: 1 }}
                 value={form.privateKeyPath}
                 onChange={(e) => set({ privateKeyPath: e.target.value })}
-                placeholder="例如 ~/.ssh/id_rsa"
+                placeholder={t('settings.keyPlaceholder')}
               />
-              <button className="btn" onClick={() => void pickKey()} title="从本机选择私钥文件">
-                浏览…
+              <button className="btn" onClick={() => void pickKey()} title={t('settings.pickKeyTitle')}>
+                {t('settings.browse')}
               </button>
             </div>
           </div>
         ) : (
           <div className="form-row">
-            <label>密码</label>
+            <label>{t('settings.authPassword')}</label>
             <input
               className="input"
               type="password"
@@ -158,37 +160,37 @@ export default function SettingsModal({
             onChange={(e) => set({ keepAwake: e.target.checked })}
           />
           <label htmlFor="keep-awake" style={{ margin: 0 }}>
-            连接期间保持设备唤醒
-            <span style={{ color: 'var(--text-faint)' }}>（防止 Kindle 自动休眠导致频繁断连）</span>
+            {t('settings.keepAwake')}
+            <span style={{ color: 'var(--text-faint)' }}>{t('settings.keepAwakeHint')}</span>
           </label>
         </div>
-        {error && <div style={{ color: 'var(--red)', fontSize: 12, marginTop: 6 }}>连接失败：{error}</div>}
+        {error && <div style={{ color: 'var(--red)', fontSize: 12, marginTop: 6 }}>{t('settings.connectFailed', { err: error })}</div>}
         <div className="form-actions" style={{ justifyContent: 'space-between' }}>
           <div>
             {editing && (
               <button className="btn danger" onClick={() => setConfirmDelete(true)}>
-                删除
+                {t('settings.delete')}
               </button>
             )}
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn" onClick={onClose}>
-              取消
+              {t('common.cancel')}
             </button>
             <button className="btn" disabled={busy || !form.host} onClick={() => void save(false)}>
-              保存
+              {t('settings.save')}
             </button>
             <button className="btn primary" disabled={busy || !form.host} onClick={() => void save(true)}>
-              {busy ? '连接中…' : '保存并连接'}
+              {busy ? t('settings.connecting') : t('settings.saveConnect')}
             </button>
           </div>
         </div>
 
         {confirmDelete && (
           <ConfirmDialog
-            title={`删除设备「${form.name || form.host}」`}
-            body={<>只删除本机的连接记录，不影响设备本身。确定删除吗？</>}
-            confirmText="删除"
+            title={t('settings.deleteTitle', { name: form.name || form.host })}
+            body={<>{t('settings.deleteBody')}</>}
+            confirmText={t('settings.delete')}
             danger
             onConfirm={() => void doDelete()}
             onCancel={() => setConfirmDelete(false)}
